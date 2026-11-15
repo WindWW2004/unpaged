@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:fragment="head(title)">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${title} + ' · FixMyRide'">FixMyRide</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+<header class="site-header" th:fragment="nav">
+    <a class="brand" th:href="@{/}" aria-label="FixMyRide dashboard">
+        <span class="brand-mark">F</span>
+        <span><strong>FixMyRide</strong><small>Service manager</small></span>
+    </a>
+    <nav aria-label="Primary navigation">
+        <a th:href="@{/}">Dashboard</a>
+        <a th:href="@{/jobs}">Service jobs</a>
+        <a th:href="@{/reports}">Reports</a>
+        <a class="button button-small" th:href="@{/jobs/request}">New request</a>
+    </nav>
+</header>
+<div th:fragment="messages">
+    <div class="flash flash-success" th:if="${successMessage}" th:text="${successMessage}"></div>
+    <div class="flash flash-info" th:if="${infoMessage}" th:text="${infoMessage}"></div>
+</div>
+<footer th:fragment="footer">
+    <p>FixMyRide classroom edition · Spring Boot, Java 21, Thymeleaf, and H2</p>
+</footer>
+</body>
+</html>

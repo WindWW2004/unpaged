@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Error')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: nav}"></header>
+<main class="page-shell narrow-shell">
+    <section class="error-card">
+        <span class="error-icon">!</span>
+        <p class="eyebrow">Business rule exception</p>
+        <h1 th:text="${errorTitle ?: 'Something went wrong'}">Something went wrong</h1>
+        <p th:text="${errorMessage ?: message ?: 'The application could not complete this request.'}">Error message</p>
+        <a class="button" th:href="@{/}">Return to dashboard</a>
+    </section>
+</main>
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>

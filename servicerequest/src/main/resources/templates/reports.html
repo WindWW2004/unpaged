@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Reports')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: nav}"></header>
+<main class="page-shell">
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">Java streams and collectors</p>
+            <h1>Operational reports</h1>
+            <p>Every value on this page is derived from the polymorphic job collection.</p>
+        </div>
+    </div>
+    <section class="metric-grid three">
+        <article class="metric-card accent-blue"><span>Recorded jobs</span><strong th:text="${report.totalJobs}">0</strong><small>Repository count</small></article>
+        <article class="metric-card accent-orange"><span>Expected revenue</span><strong th:text="${#numbers.formatCurrency(report.expectedRevenue)}">$0</strong><small>map + reduce</small></article>
+        <article class="metric-card accent-green"><span>Mean duration</span><strong th:text="${#numbers.formatDecimal(report.averageMinutes, 1, 1)} + ' min'">0 min</strong><small>mapToLong + average</small></article>
+    </section>
+    <section class="report-grid">
+        <article class="panel">
+            <p class="eyebrow">groupingBy status</p>
+            <h2>Workflow distribution</h2>
+            <div class="report-row" th:each="entry : ${report.jobsByStatus}">
+                <span th:text="${entry.key.displayName}">Status</span><strong th:text="${entry.value}">0</strong>
+            </div>
+        </article>
+        <article class="panel">
+            <p class="eyebrow">groupingBy subtype</p>
+            <h2>Service mix</h2>
+            <div class="report-row" th:each="entry : ${report.jobsByType}">
+                <span th:text="${entry.key.displayName}">Type</span><strong th:text="${entry.value}">0</strong>
+            </div>
+        </article>
+        <article class="panel">
+            <p class="eyebrow">Map mechanic → count</p>
+            <h2>Active workload</h2>
+            <p class="empty-state" th:if="${report.mechanicWorkload.isEmpty()}">No assigned active jobs.</p>
+            <div class="report-row" th:each="entry : ${report.mechanicWorkload}">
+                <span th:text="${entry.key}">Mechanic</span><strong th:text="${entry.value + ' job(s)'}">0</strong>
+            </div>
+        </article>
+    </section>
+</main>
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>
