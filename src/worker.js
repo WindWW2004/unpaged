@@ -64,6 +64,12 @@ async function passwordHash(password, salt) {
 const inviteKey = (typed) => "invite:" + String(typed).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 40);
 const inviteView = ({ code, note, created, usedBy }) => ({ code: code.slice(0, 5) + "-" + code.slice(5), note, created, usedBy: usedBy || null });
 
+// A RAM ID as a student typed it: R and 8 digits. The R may be left out.
+function ramId(typed) {
+  const m = /^R?(\d{8})$/i.exec(String(typed ?? "").trim());
+  return m ? "R" + m[1] : null;
+}
+
 const bearer = (request) => (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
 
 // Instructor accounts, their sign-in sessions, and the list of courses with who owns each.
@@ -293,6 +299,11 @@ export class Directory extends DurableObject {
 //
 // Speaker notes are also stored apart from the page, and are only ever sent to the instructor.
 //
+// A deck can ask for RAM IDs. While it is live, a student gets the pages only after giving
+// theirs. The first time each ID gets a page is recorded as the sign-in, and quiz answers are
+// kept under the ID. Only the instructor can read either. Nothing is asked for once the deck
+// is released. An ID is checked for its form only: nothing here can tell whose it is.
+//
 // Deck status: "draft" (uploaded, not taught) -> "live" (being taught) -> "released"
 // (taught; students may browse it freely).
 export class Course extends DurableObject {
@@ -342,6 +353,7 @@ export class Course extends DurableObject {
           title: d.title,
           pages: d.pages.length,
           status: d.status,
+          requireId: Boolean(d.requireId), // whether a live class of this deck asks for RAM IDs
         })),
       });
     }
@@ -349,8 +361,11 @@ export class Course extends DurableObject {
     if (path === "/ws") {
       const { 0: client, 1: server } = new WebSocketPair();
       // The role only decides who is counted as a student; it grants nothing.
-      this.ctx.acceptWebSocket(server, [url.searchParams.get("role") === "instructor" ? "instructor" : "student"]);
-      if (live) server.send(await this.slideMessage(decks, live));
+      const tags = [url.searchParams.get("role") === "instructor" ? "instructor" : "student"];
+      const sid = ramId(url.searchParams.get("sid"));
+      if (sid && tags[0] === "student") tags.push(`sid:${sid}`);
+      this.ctx.acceptWebSocket(server, tags);
+      if (live) await this.sendSlide(decks, live, [server]);
       this.sendCount();
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -391,7 +406,7 @@ export class Course extends DurableObject {
       if (!Number.isInteger(index) || index < 0 || index >= deck.pages.length) return text("bad page", 400);
       live.index = index;
       await store.put("live", live);
-      this.broadcastRaw(await this.slideMessage(decks, live), "student");
+      await this.sendSlide(decks, live, this.ctx.getWebSockets("student"));
       // The instructor's other windows (a projector window, a phone used as a remote) follow too.
       // "from" lets the window that turned the page ignore its own echo.
       this.broadcastRaw(JSON.stringify({ type: "goto", deckId: live.deckId, index, from: String(body.from || "").slice(0, 40) }), "instructor");
@@ -405,9 +420,13 @@ export class Course extends DurableObject {
       if (!live || !body || body.deckId !== live.deckId || body.page !== live.index) return text("that page is not live", 409);
       if (live.revealed?.includes(live.index)) return text("answers are already shown", 409);
       const key = await store.get(`quiz:${live.deckId}:${live.index}`);
-      const { quiz, option, voter } = body;
+      const { quiz, option } = body;
+      // Answers are kept per RAM ID when the deck asks for one, otherwise per anonymous browser id.
+      const byId = Boolean(decks.find((d) => d.id === live.deckId)?.requireId);
+      const voter = byId ? ramId(body.sid) : body.voter;
       if (!key || !Number.isInteger(quiz) || !key[quiz] || !Number.isInteger(option) || option < 0 || option >= key[quiz].options) return text("bad answer", 400);
-      if (typeof voter !== "string" || !DECK_ID.test(voter)) return text("bad answer", 400);
+      if (typeof voter !== "string" || !(byId || DECK_ID.test(voter))) return text(byId ? "a RAM ID is needed" : "bad answer", 400);
+      if (byId && !((await store.get(`attend:${live.deckId}`)) || {})[voter]) return text("sign in to the class first", 403);
       const votesKey = `votes:${live.deckId}:${live.index}`;
       const votes = (await store.get(votesKey)) || {};
       if (!votes[voter] && Object.keys(votes).length >= MAX_VOTERS) return text("too many answers", 429);
@@ -469,7 +488,7 @@ export class Course extends DurableObject {
 
     if (rest === "" && method === "DELETE") {
       if (live?.deckId === id) return text("end the class first", 409);
-      for (const prefix of [`page:${id}:`, `quiz:${id}:`, `notes:${id}:`, `votes:${id}:`, `asset:${id}/`, `chunk:${id}/`]) {
+      for (const prefix of [`page:${id}:`, `quiz:${id}:`, `notes:${id}:`, `votes:${id}:`, `attend:${id}`, `asset:${id}/`, `chunk:${id}/`]) {
         for (;;) {
           const keys = [...(await store.list({ prefix, limit: 128 })).keys()];
           if (!keys.length) break;
@@ -514,6 +533,34 @@ export class Course extends DurableObject {
       return new Response(notes, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     }
 
+    // Whether a live class of this deck asks students for their RAM ID.
+    if (rest === "/settings" && method === "POST") {
+      if (live?.deckId === id) return text("end the class first", 409);
+      deck.requireId = Boolean((await request.json().catch(() => null))?.requireId);
+      await store.put("decks", decks);
+      this.broadcast({ type: "decks" });
+      return text("ok");
+    }
+
+    // Who signed in to the last class of this deck, and what each RAM ID answered.
+    // Instructor only. It is cleared when the deck is taught again.
+    if (rest === "/report" && method === "GET") {
+      if (!instructor) return text("instructor only", 403);
+      const keys = await store.list({ prefix: `quiz:${id}:` });
+      const votes = await store.list({ prefix: `votes:${id}:` });
+      const quizzes = [];
+      for (const [name, key] of keys) {
+        const page = Number(name.slice(name.lastIndexOf(":") + 1));
+        const given = Object.entries(votes.get(`votes:${id}:${page}`) || {}).filter(([who]) => ramId(who) === who);
+        key.forEach((q, n) => {
+          const answers = Object.fromEntries(given.filter(([, v]) => Number.isInteger(v[n])).map(([who, v]) => [who, v[n]]));
+          quizzes.push({ page, title: deck.pages[page], quiz: n, correct: q.correct, answers });
+        });
+      }
+      quizzes.sort((a, b) => a.page - b.page || a.quiz - b.quiz);
+      return Response.json({ title: deck.title, signedIn: (await store.get(`attend:${id}`)) || {}, quizzes }, { headers: { "Cache-Control": "no-store" } });
+    }
+
     if (rest === "/start" && method === "POST") {
       if (live && live.deckId !== id) return text("another class is live in this course", 409);
       if (live) return Response.json(live); // resuming
@@ -521,15 +568,41 @@ export class Course extends DurableObject {
       // A new class starts with no answers from the last time this deck was taught.
       const old = [...(await store.list({ prefix: `votes:${id}:` })).keys()];
       if (old.length) await store.delete(old);
+      await store.delete(`attend:${id}`); // and with no sign-ins
       deck.status = "live";
       await store.put("decks", decks);
       await store.put("live", started);
-      this.broadcastRaw(await this.slideMessage(decks, started), "student");
+      await this.sendSlide(decks, started, this.ctx.getWebSockets("student"));
       this.broadcast({ type: "decks" });
       return Response.json(started);
     }
 
     return text("not found", 404);
+  }
+
+  // Sends the live page to these sockets. For a deck that asks for RAM IDs, a student who has
+  // given none is asked for it instead, and one who has is signed in the first time.
+  async sendSlide(decks, live, sockets) {
+    const deck = decks.find((d) => d.id === live.deckId);
+    const slide = await this.slideMessage(decks, live);
+    const attend = deck.requireId ? (await this.ctx.storage.get(`attend:${deck.id}`)) || {} : null;
+    let signed = false;
+    for (const s of sockets) {
+      let data = slide;
+      const tags = attend ? this.ctx.getTags(s) : [];
+      if (attend && !tags.includes("instructor")) {
+        const sid = tags.find((t) => t.startsWith("sid:"))?.slice(4);
+        if (!sid) data = JSON.stringify({ type: "need-id", deckId: deck.id, title: deck.title });
+        else if (!attend[sid] && Object.keys(attend).length < MAX_VOTERS) {
+          attend[sid] = Date.now();
+          signed = true;
+        }
+      }
+      try {
+        s.send(data);
+      } catch {}
+    }
+    if (signed) await this.ctx.storage.put(`attend:${deck.id}`, attend);
   }
 
   async slideMessage(decks, live) {

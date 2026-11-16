@@ -230,8 +230,52 @@ function deckRow(d) {
     loadCourse();
   };
 
-  li.append(name, badge, meta, start, del);
+  // Ask students for their RAM ID during a live class of this deck.
+  const ask = document.createElement("label");
+  ask.className = "check";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = d.requireId;
+  box.disabled = d.status === "live";
+  box.onchange = async () => {
+    const res = await api(`/${code}/decks/${d.id}/settings`, { method: "POST", body: JSON.stringify({ requireId: box.checked }) });
+    $("deck-error").textContent = res.ok ? "" : "Could not change that setting.";
+    loadCourse();
+  };
+  ask.append(box, " Ask for RAM ID");
+
+  li.append(name, badge, meta, ask);
+  if (d.requireId && d.status !== "draft") {
+    const sheet = document.createElement("button");
+    sheet.className = "btn-quiet";
+    sheet.textContent = "Sign-in sheet";
+    sheet.title = "Who signed in to the last class of this deck and what they answered, as a CSV file.";
+    sheet.onclick = () => downloadSheet(d);
+    li.append(sheet);
+  }
+  li.append(start, del);
   return li;
+}
+
+// The sign-in sheet: one row per RAM ID, with when it signed in and what it answered.
+async function downloadSheet(d) {
+  const res = await api(`/${code}/decks/${d.id}/report`);
+  if (!res.ok) return ($("deck-error").textContent = "Could not get the sign-in sheet.");
+  const { signedIn, quizzes } = await res.json();
+  const ids = [...new Set([...Object.keys(signedIn), ...quizzes.flatMap((q) => Object.keys(q.answers))])].sort();
+  const letter = (n) => String.fromCharCode(65 + n);
+  const rows = [["RAM ID", "Signed in", ...quizzes.map((q) => `Page ${q.page + 1} Q${q.quiz + 1} (answer ${q.correct.map(letter).join("") || "none"})`), "Correct"]];
+  for (const id of ids) {
+    const given = quizzes.map((q) => q.answers[id]);
+    const right = quizzes.filter((q, i) => q.correct.includes(given[i])).length;
+    rows.push([id, signedIn[id] ? new Date(signedIn[id]).toLocaleString() : "", ...given.map((g) => (g === undefined ? "" : letter(g))), `${right} of ${quizzes.length}`]);
+  }
+  const csv = rows.map((r) => r.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
+  a.download = `${d.title} sign-in sheet.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 $("copy").addEventListener("click", async () => {

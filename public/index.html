@@ -58,7 +58,28 @@
         </div>
       </section>
       <p><a class="link" href="/">Open a different course</a></p>
+      <p class="muted" id="ramid-now" hidden>RAM ID on this device: <strong id="ramid-value"></strong>. <button class="btn-quiet" id="ramid-forget">Not you? Remove it</button></p>
     </div>
+  </main>
+
+  <!-- A live class that asks for RAM IDs -->
+  <main class="page" id="ramid" hidden>
+    <section class="hero">
+      <div class="ss-wrap hero-in split">
+        <div class="hero-text">
+          <h1>Class is live</h1>
+          <p class="ss-lede" id="ramid-deck"></p>
+        </div>
+        <form class="card float" id="ramid-form">
+          <label class="field">Your RAM ID
+            <input class="code-input" type="text" id="ramid-input" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="9" placeholder="R01234567" required>
+          </label>
+          <p class="muted">Your instructor uses it to record that you were here and what you answered. Other students do not see it.</p>
+          <div class="error" id="ramid-error" role="alert"></div>
+          <div class="row"><button class="ss-btn" type="submit">Join the class</button></div>
+        </form>
+      </div>
+    </section>
   </main>
 
   <footer class="ss-footer" id="footer">Farmingdale State College</footer>

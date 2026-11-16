@@ -25,7 +25,16 @@ try {
   localStorage.setItem("unpaged.voter", voter);
 } catch {}
 
+// The student's RAM ID, asked for by a live class of a deck whose instructor wants it.
+// Kept on this device so it is asked once.
+const RAMID_KEY = "unpaged.ramid";
+let ramid = "";
+try {
+  ramid = localStorage.getItem(RAMID_KEY) || "";
+} catch {}
+
 function show(view) {
+  $("ramid").hidden = view !== "ramid";
   $("join").hidden = view !== "join";
   $("course").hidden = view !== "course";
   $("viewer").hidden = view !== "viewer";
@@ -35,6 +44,8 @@ function show(view) {
 function renderCourse() {
   document.title = `${course.title} · Unpaged · Social Shields`;
   $("course-title").textContent = course.title;
+  $("ramid-now").hidden = !ramid;
+  $("ramid-value").textContent = ramid;
   $("no-decks").hidden = course.decks.length > 0;
   $("decks").replaceChildren(
     ...course.decks.map((d) => {
@@ -228,7 +239,7 @@ function answer(q, option) {
     mine.set(`${quiz.deckId}:${quiz.page}`, quiz.selected);
     fetch(`/api/courses/${code}/answer`, {
       method: "POST",
-      body: JSON.stringify({ deckId: quiz.deckId, page: quiz.page, quiz: q, option, voter }),
+      body: JSON.stringify({ deckId: quiz.deckId, page: quiz.page, quiz: q, option, voter, sid: ramid }),
     }).catch(() => {});
   } else if (quiz.key?.[q]) {
     quiz.results[q] = { correct: quiz.key[q].correct, explain: quiz.key[q].explain };
@@ -238,7 +249,7 @@ function answer(q, option) {
 
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  ws = new WebSocket(`${proto}//${location.host}/api/courses/${code}/ws`);
+  ws = new WebSocket(`${proto}//${location.host}/api/courses/${code}/ws${ramid ? `?sid=${ramid}` : ""}`);
 
   ws.onopen = () => {
     retryMs = 1000;
@@ -251,6 +262,13 @@ function connect() {
     const msg = JSON.parse(e.data);
     if (msg.type === "slide") {
       showLive(msg);
+    } else if (msg.type === "need-id") {
+      // The class asks for a RAM ID and this device has not given one.
+      mode = "id";
+      review = null;
+      $("ramid-deck").textContent = msg.title;
+      show("ramid");
+      $("ramid-input").focus();
     } else if (msg.type === "reveal") {
       if (mode === "live" && quiz?.deckId === msg.deckId && quiz.page === msg.page) {
         quiz.results = msg.results;
@@ -260,13 +278,16 @@ function connect() {
       mine.clear();
       // The class is over: this deck is now open, so stay on the same page and hand over the controls.
       if (mode === "live") openReview(msg.deckId, msg.index);
+      else if (mode === "id") goHome();
       else loadCourse();
     } else if (msg.type === "decks" && mode === "home") {
       loadCourse();
     }
   };
 
+  const socket = ws;
   ws.onclose = () => {
+    if (socket !== ws) return; // replaced on purpose, after a RAM ID was entered or removed
     clearInterval(pingTimer);
     if (mode === "live") $("status").textContent = "Connection lost. Reconnecting…";
     setTimeout(connect, retryMs);
@@ -301,6 +322,29 @@ async function join(value) {
 $("join-form").addEventListener("submit", (e) => {
   e.preventDefault();
   join($("code").value);
+});
+// Connects again so the server learns the RAM ID, or that there is none any more.
+function setRamid(value) {
+  ramid = value;
+  try {
+    if (value) localStorage.setItem(RAMID_KEY, value);
+    else localStorage.removeItem(RAMID_KEY);
+  } catch {}
+  ws?.close();
+  connect();
+}
+$("ramid-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const m = /^R?(\d{8})$/i.exec($("ramid-input").value.trim());
+  $("ramid-error").textContent = m ? "" : "A RAM ID is the letter R and 8 digits.";
+  if (!m) return;
+  $("ramid-input").value = "";
+  goHome(); // the class's current page arrives as soon as the connection is back
+  setRamid("R" + m[1]);
+});
+$("ramid-forget").addEventListener("click", () => {
+  setRamid("");
+  renderCourse();
 });
 $("back").addEventListener("click", goHome);
 $("prev").addEventListener("click", () => goTo(review.index - 1));
