@@ -91,65 +91,7 @@ function showAccount(account) {
   $("worker-off").hidden = !account.worker;
   $("invites").hidden = !account.owner;
   if (account.owner) showInvites();
-  showAppToken(account.appToken);
-  showApps();
 }
-
-// ---------- Apps: your own Worker under this site's address ----------
-
-function showAppToken(has, token) {
-  $("app-token-new").textContent = has ? "Replace the token" : "Create a token";
-  $("app-token-off").hidden = !has;
-  $("app-token-shown").hidden = !token;
-  if (!token) return;
-  $("app-token").value = token;
-  $("app-command").textContent =
-    `curl -fsS -X PUT ${location.origin}/api/apps/NAME \\\n  -H "Authorization: Bearer ${token}" \\\n  -d '{"origin":"https://YOUR-WORKER.workers.dev"}'`;
-}
-
-async function showApps(res) {
-  res ||= await call("/apps");
-  if (!res.ok) return;
-  $("app-list").replaceChildren(
-    ...(await res.json()).map((app) => {
-      const li = document.createElement("li");
-      const a = document.createElement("a");
-      a.className = "link";
-      a.href = `/${app.name}/`;
-      a.textContent = `/${app.name}/`;
-      const meta = document.createElement("span");
-      meta.className = "meta";
-      meta.textContent = app.origin + (app.owner === $("who").textContent ? "" : ` · ${app.owner}`);
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "btn-quiet";
-      remove.textContent = "Remove";
-      remove.onclick = async () => {
-        if (!confirm(`Stop showing /${app.name}/ on this site? Deploying the app again will register it again.`)) return;
-        showApps(await call(`/apps/${app.name}`, { method: "DELETE" }));
-      };
-      li.append(a, document.createElement("span"), remove, meta);
-      return li;
-    }),
-  );
-}
-
-$("app-token-new").addEventListener("click", async () => {
-  if (!$("app-token-off").hidden && !confirm("The token you have now will stop working. Deploy commands that use it must be changed to the new one.")) return;
-  const res = await call("/account/app-token", { method: "POST" });
-  $("app-error").textContent = res.ok ? "" : "Could not create a token. Try again.";
-  if (res.ok) showAppToken(true, (await res.json()).token);
-});
-$("app-token-off").addEventListener("click", async () => {
-  if (!confirm("The token will stop working. Apps already registered stay until you remove them.")) return;
-  const res = await call("/account/app-token", { method: "DELETE" });
-  if (res.ok) showAppToken(false);
-});
-$("app-command-copy").addEventListener("click", async () => {
-  await navigator.clipboard.writeText($("app-command").textContent);
-  $("app-command-copy").textContent = "Copied";
-  setTimeout(() => ($("app-command-copy").textContent = "Copy the command"), 1500);
-});
 
 // ---------- Invitation codes (site owner) ----------
 

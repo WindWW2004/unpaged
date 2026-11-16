@@ -64,23 +64,6 @@ async function passwordHash(password, salt) {
 const inviteKey = (typed) => "invite:" + String(typed).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 40);
 const inviteView = ({ code, note, created, usedBy }) => ({ code: code.slice(0, 5) + "-" + code.slice(5), note, created, usedBy: usedBy || null });
 
-// Apps: an instructor's own Worker shown under this site's address, as /name/.
-const APP_NAME = /^[a-z][a-z0-9-]{1,30}[a-z0-9]$/;
-// Paths that belong to this site, now or plausibly later.
-const RESERVED = new Set(["api", "apps", "instructor", "guide", "cdn-cgi", "index", "student", "students", "courses", "account", "login", "signup", "assets", "static", "admin"]);
-const MAX_APPS = 5; // per instructor
-
-// The address of someone's Worker as they typed it: its origin, or null if it is not usable.
-function workerOrigin(typed) {
-  try {
-    const given = new URL(String(typed).trim());
-    const local = given.hostname === "localhost" || given.hostname === "127.0.0.1";
-    return given.protocol === "https:" || (local && given.protocol === "http:") ? given.origin : null;
-  } catch {
-    return null;
-  }
-}
-
 const bearer = (request) => (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
 
 // Instructor accounts, their sign-in sessions, and the list of courses with who owns each.
@@ -92,11 +75,6 @@ const bearer = (request) => (request.headers.get("Authorization") || "").replace
 // An instructor may keep their courses in their own copy of this Worker. The account then
 // holds that Worker's address and its INSTRUCTOR_KEY, and each of those courses is listed
 // here with the address, so this site can pass requests for it along.
-//
-// An instructor may also show a Worker of their own under this site's address ("apps", see
-// the end of this file). The table of apps is kept here. An app is registered by its
-// instructor, signed in or with their app token: a long-lived credential made for a deploy
-// script, good for registering apps and nothing else.
 //
 // Paths under /public are reachable from the internet (as /api/...); the rest are called
 // only by the Worker below.
@@ -134,8 +112,6 @@ export class Directory extends DurableObject {
       const mine = url.searchParams.has("all") ? all : all.filter((c) => (c.owner ? c.owner === name : Boolean(user?.owner)));
       return Response.json(mine.sort((a, b) => b.created - a.created).map(({ code, title, created }) => ({ code, title, created })));
     }
-
-    if (path === "/apps") return Response.json([...(await store.list({ prefix: "app:" })).values()]);
 
     if (!path.startsWith("/public/")) return text("not found", 404);
     const body = method === "GET" ? null : await request.json().catch(() => null);
@@ -196,13 +172,6 @@ export class Directory extends DurableObject {
     }
 
     const token = bearer(request);
-
-    if (path === "/public/apps" || path.startsWith("/public/apps/")) {
-      const by = (await this.userOf(token)) || (await this.userOfAppToken(token));
-      if (!by) return text("sign in first", 401);
-      return this.apps(request, path, body, by);
-    }
-
     const user = await this.userOf(token);
     if (!user) return text("sign in first", 401);
 
@@ -212,21 +181,7 @@ export class Directory extends DurableObject {
     }
 
     if (path === "/public/account" && method === "GET") {
-      return Response.json({ name: user.name, owner: Boolean(user.owner), worker: user.worker?.origin || null, appToken: Boolean(user.appToken) });
-    }
-
-    // The app token. Making a new one ends the old one. It is shown once and kept as a digest.
-    if (path === "/public/account/app-token" && (method === "POST" || method === "DELETE")) {
-      if (user.appToken) await store.delete(`apptoken:${user.appToken}`);
-      delete user.appToken;
-      let made = null;
-      if (method === "POST") {
-        made = "uap_" + randomHex(24);
-        user.appToken = await sha256(made);
-        await store.put(`apptoken:${user.appToken}`, { name: user.name });
-      }
-      await store.put(`user:${user.name}`, user);
-      return Response.json({ token: made });
+      return Response.json({ name: user.name, owner: Boolean(user.owner), worker: user.worker?.origin || null });
     }
 
     // Invitation codes: the site-owner accounts create, list and withdraw them.
@@ -260,8 +215,15 @@ export class Directory extends DurableObject {
     }
 
     if (path === "/public/account/worker" && method === "PUT") {
-      const origin = workerOrigin(body?.origin);
-      if (!origin) return text("Enter the address of your Worker, starting with https://", 400);
+      let origin;
+      try {
+        const given = new URL(str(body?.origin).trim());
+        const local = given.hostname === "localhost" || given.hostname === "127.0.0.1";
+        if (given.protocol !== "https:" && !(local && given.protocol === "http:")) throw 0;
+        origin = given.origin;
+      } catch {
+        return text("Enter the address of your Worker, starting with https://", 400);
+      }
       if (origin === request.headers.get("X-Site-Origin")) return text("That is this site. Enter the address of your own Worker.", 400);
       const key = str(body?.key);
       user.worker = { origin, key };
@@ -277,46 +239,6 @@ export class Directory extends DurableObject {
     }
 
     return text("not found", 404);
-  }
-
-  // GET /public/apps lists the instructor's apps (every app, for a site owner).
-  // PUT /public/apps/name { origin } registers or updates one; DELETE removes it.
-  async apps(request, path, body, user) {
-    const store = this.ctx.storage;
-    const method = request.method;
-    const all = async () => [...(await store.list({ prefix: "app:" })).values()];
-    const listing = async () => Response.json((await all()).filter((a) => user.owner || a.owner === user.name).sort((a, b) => a.name.localeCompare(b.name)));
-    if (path === "/public/apps") return method === "GET" ? listing() : text("method not allowed", 405);
-
-    const name = path.slice("/public/apps/".length);
-    if (!APP_NAME.test(name)) return text("Use 3 to 32 lowercase letters, digits or hyphens for the name, starting with a letter.", 400);
-    const current = await store.get(`app:${name}`);
-    if (current && current.owner !== user.name && !user.owner) return text("That name is taken by another instructor.", 409);
-    if (method === "DELETE") {
-      await store.delete(`app:${name}`);
-      return listing();
-    }
-    if (method !== "PUT") return text("method not allowed", 405);
-
-    const origin = workerOrigin(body?.origin);
-    if (!origin) return text("Give the address of your Worker as origin, starting with https://", 400);
-    const site = request.headers.get("X-Site-Origin");
-    if (origin === site) return text("That is this site. Give the address of your own Worker.", 400);
-    // A name must not hide a page of this site.
-    let taken = RESERVED.has(name);
-    for (const page of [`/${name}`, `/${name}/`]) taken ||= (await this.env.ASSETS.fetch(new Request(site + page))).status !== 404;
-    if (taken) return text("That name is used by the site. Choose another.", 400);
-    if (!current && (await all()).filter((a) => a.owner === user.name).length >= MAX_APPS) return text(`You can register up to ${MAX_APPS} apps. Remove one first.`, 400);
-    await store.put(`app:${name}`, { name, origin, owner: current?.owner || user.name, created: current?.created || Date.now(), updated: Date.now() });
-    return listing();
-  }
-
-  async userOfAppToken(token) {
-    if (!token.startsWith("uap_")) return null;
-    const digest = await sha256(token);
-    const held = await this.ctx.storage.get(`apptoken:${digest}`);
-    const user = held ? await this.ctx.storage.get(`user:${held.name}`) : null;
-    return user?.appToken === digest ? user : null;
   }
 
   async newSession(name) {
@@ -773,57 +695,16 @@ async function homeOf(env, code) {
   return homes.get(code);
 }
 
-// The apps table, name -> { origin, owner }. It is read for every path that could be an app,
-// so each isolate keeps a copy for half a minute; a change shows everywhere within that time.
-let appTable = null;
-let appsLoaded = 0;
-async function appsOf(env) {
-  if (!appTable || Date.now() - appsLoaded > 30_000) {
-    const list = await (await directory(env).fetch("https://directory/apps")).json();
-    appTable = new Map(list.map((a) => [a.name, a]));
-    appsLoaded = Date.now();
-  }
-  return appTable;
-}
-
-// Passes a request for /name/... to the app's Worker, which sees the same path.
-async function toApp(request, url, app) {
-  if (request.headers.has("X-Unpaged-App")) return text("This app points back at the site.", 508);
-  if (url.pathname === `/${app.name}`) return Response.redirect(`${url.origin}/${app.name}/${url.search}`, 308);
-  const out = new Request(app.origin + url.pathname + url.search, request);
-  out.headers.set("X-Unpaged-App", "1");
-  out.headers.set("X-Forwarded-Host", url.host);
-  out.headers.set("X-Forwarded-Proto", url.protocol.slice(0, -1));
-  let res;
-  try {
-    res = await fetch(out, { redirect: "manual" });
-  } catch {
-    return text("This app is not reachable right now. Try again shortly.", 502);
-  }
-  // A redirect that names the app's own address is sent to the same path on this site.
-  const to = res.headers.get("Location");
-  if (to?.startsWith(app.origin + "/")) {
-    res = new Response(res.body, res);
-    res.headers.set("Location", url.origin + to.slice(app.origin.length));
-  }
-  return res;
-}
-
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (/^\/api\/(signup|login|logout|account(\/worker|\/password|\/app-token)?|invites(\/[A-Za-z0-9-]{1,40})?|apps(\/[^/]{1,64})?)$/.test(url.pathname)) {
+    if (/^\/api\/(signup|login|logout|account(\/worker|\/password)?|invites(\/[A-Za-z0-9-]{1,40})?)$/.test(url.pathname)) {
       const out = new Request("https://directory/public" + url.pathname.slice("/api".length), request);
       out.headers.set("X-Site-Origin", url.origin);
-      if (url.pathname.startsWith("/api/apps/")) appsLoaded = 0; // read the table again after a change
       return directory(env).fetch(out);
     }
     const m = url.pathname.match(/^\/api\/courses(?:\/([A-Za-z0-9]{6})(\/.*)?)?$/);
-    if (!m) {
-      const first = url.pathname.split("/", 2)[1];
-      const app = APP_NAME.test(first) && !RESERVED.has(first) ? (await appsOf(env)).get(first) : null;
-      return app ? toApp(request, url, app) : env.ASSETS.fetch(request);
-    }
+    if (!m) return env.ASSETS.fetch(request);
     const code = m[1]?.toUpperCase();
     const sub = m[2] || "/";
     if (sub === "/init") return text("not found", 404);

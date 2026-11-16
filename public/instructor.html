@@ -110,25 +110,6 @@
             </form>
           </details>
           <details>
-            <summary>Show my own app on this site</summary>
-            <div class="account-form">
-              <p class="muted">A Worker of your own can appear under this site's address, as <code>/name/</code>. It registers itself each time you deploy it: create a token, then add the command below to the end of your deploy command. Your Worker must serve its pages under <code>/name/</code>.</p>
-              <div class="row">
-                <button class="ss-btn" type="button" id="app-token-new">Create a token</button>
-                <button class="btn-quiet" type="button" id="app-token-off" hidden>Revoke the token</button>
-              </div>
-              <div class="account-form" id="app-token-shown" hidden>
-                <label class="field">Your token. It is shown only now.
-                  <input type="text" id="app-token" readonly>
-                </label>
-                <pre class="snippet" id="app-command"></pre>
-                <div class="row"><button class="btn-quiet" type="button" id="app-command-copy">Copy the command</button></div>
-              </div>
-              <div class="error" id="app-error" role="alert"></div>
-              <ul class="list invites" id="app-list"></ul>
-            </div>
-          </details>
-          <details>
             <summary>Change password</summary>
             <form class="account-form" id="password-form">
               <label class="field">Current password
