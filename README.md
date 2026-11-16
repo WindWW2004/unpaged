@@ -45,6 +45,36 @@ By default every instructor's courses are stored in this Worker. An instructor w
 
 Courses they create from then on are stored in their Worker, and the courses already in it are listed too. Courses created here earlier stay here. Students and the instructor keep using this site's address: this Worker passes requests for those courses along. The instructor's key is kept with their account here, since this Worker needs it to act for them. Requests still pass through this Worker and count toward this account's request limits; the storage is theirs. Their copy should be kept at the same version as this one, because the pages everyone loads come from here.
 
+## An instructor's own app under this site's address
+
+An instructor can show a Worker of their own on this site, as `https://SITE/name/`, without the site owner doing anything. The Worker registers itself through an API each time it is deployed, and this Worker passes requests for `/name/...` along to it.
+
+1. On the course list, under **Account > Show my own app on this site**, create a token. It is shown once. It can register apps and nothing else; replace or revoke it there at any time.
+2. Add the registration to the end of the app's deploy command, in `package.json` or in the Workers Builds deploy command:
+   ```sh
+   wrangler deploy && curl -fsS -X PUT https://SITE/api/apps/NAME \
+     -H "Authorization: Bearer TOKEN" \
+     -d '{"origin":"https://YOUR-WORKER.workers.dev"}'
+   ```
+   Registering again with the same name is harmless and updates the address. Within half a minute `https://SITE/NAME/` shows the app.
+
+| Request | Does |
+| --- | --- |
+| `PUT /api/apps/NAME` with `{"origin": "https://..."}` | registers the app, or updates its address |
+| `DELETE /api/apps/NAME` | stops showing it |
+| `GET /api/apps` | lists your apps (every app, for a site owner) |
+
+Each takes `Authorization: Bearer` with the app token. A name is 3 to 32 lowercase letters, digits or hyphens, starting with a letter. It cannot be a name the site uses itself (`api`, `instructor`, `guide` and so on) or one another instructor has registered. Each instructor can register up to 5 apps. Apps are also listed, and can be removed, under **Account**; a site owner sees all of them.
+
+What to know:
+
+- The app receives the same path the browser asked for, so it must serve its pages under `/NAME/`.
+- Apps share this site's origin. A page of a registered app can read what Unpaged keeps in the browser, including an instructor's sign-in, and act as that instructor. Give invitation codes only to people you trust with that.
+- Requests to an app pass through this Worker and count toward this account's request limits.
+- A redirect that names the app's own `workers.dev` address is rewritten to the same path on this site. Cookies are passed through unchanged.
+
+The ServiceRequest demo below can be shown this way, as `/servicerequest/`.
+
 ## ServiceRequest test deployment
 
 The Spring Boot demo is mounted at `/servicerequest/` in the test Worker. The original Unpaged home page and course routes use the existing Worker code. The preview has its own Durable Objects and does not use the live site's course data or hostname.
