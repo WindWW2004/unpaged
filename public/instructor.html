@@ -24,7 +24,7 @@
     </div>
   </div>
 
-  <!-- Passcode -->
+  <!-- Sign in, or create an account with an invitation code -->
   <main class="page" id="login" hidden>
     <section class="hero">
       <div class="ss-wrap hero-in split">
@@ -33,11 +33,20 @@
           <p class="ss-lede">Create courses, add decks and teach a class.</p>
         </div>
         <form class="card float" id="login-form">
-          <label class="field">Instructor passcode
-            <input type="password" id="passcode" autocomplete="current-password" required>
+          <label class="field">Name
+            <input type="text" id="name" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required>
+          </label>
+          <label class="field">Password
+            <input type="password" id="password" autocomplete="current-password" minlength="8" maxlength="200" required>
+          </label>
+          <label class="field" id="invite-field" hidden>Invitation code
+            <input type="password" id="invite" autocomplete="off">
           </label>
           <div class="error" id="login-error" role="alert"></div>
-          <div class="row"><button class="ss-btn" type="submit">Sign in</button></div>
+          <div class="row">
+            <button class="ss-btn" type="submit" id="login-submit">Sign in</button>
+            <button class="btn-quiet" type="button" id="login-mode">Create an account</button>
+          </div>
         </form>
       </div>
     </section>
@@ -68,7 +77,53 @@
           <div class="error" id="course-error" role="alert"></div>
           <div class="row"><button class="ss-btn" type="submit">Create course</button></div>
         </form>
-        <p><button class="btn-quiet" id="sign-out">Sign out on this device</button></p>
+        <section class="card" aria-labelledby="account-h">
+          <h2 id="account-h">Account</h2>
+          <p class="muted">Signed in as <strong id="who"></strong>. <span id="worker-now"></span></p>
+          <details>
+            <summary>Keep my courses in my own Worker</summary>
+            <form class="account-form" id="worker-form">
+              <p class="muted">Deploy your own copy of Unpaged (see the README), then enter its address and its <code>INSTRUCTOR_KEY</code>. Courses you create from then on are stored there. Students still use this site. The key is kept with your account here so this site can reach your Worker.</p>
+              <label class="field">Worker address
+                <input type="text" id="worker-origin" inputmode="url" autocapitalize="none" spellcheck="false" placeholder="https://unpaged.you.workers.dev" required>
+              </label>
+              <label class="field">Its INSTRUCTOR_KEY
+                <input type="password" id="worker-key" autocomplete="off" required>
+              </label>
+              <div class="error" id="worker-error" role="alert"></div>
+              <div class="row">
+                <button class="ss-btn" type="submit">Save</button>
+                <button class="btn-quiet" type="button" id="worker-off" hidden>Stop using it</button>
+              </div>
+            </form>
+          </details>
+          <details id="invites" hidden>
+            <summary>Invitation codes</summary>
+            <form class="account-form" id="invite-form">
+              <p class="muted">Each code lets one instructor create an account. Send them the link or the code.</p>
+              <label class="field">Who it is for (optional)
+                <input type="text" id="invite-note" maxlength="80" placeholder="Dr. Rivera, Biology">
+              </label>
+              <div class="error" id="invite-error" role="alert"></div>
+              <div class="row"><button class="ss-btn" type="submit">Create a code</button></div>
+              <ul class="list invites" id="invite-list"></ul>
+            </form>
+          </details>
+          <details>
+            <summary>Change password</summary>
+            <form class="account-form" id="password-form">
+              <label class="field">Current password
+                <input type="password" id="password-current" autocomplete="current-password" required>
+              </label>
+              <label class="field">New password
+                <input type="password" id="password-new" autocomplete="new-password" minlength="8" maxlength="200" required>
+              </label>
+              <div class="error" id="password-error" role="alert"></div>
+              <div class="row"><button class="ss-btn" type="submit">Change password</button><span class="muted" id="password-done" role="status"></span></div>
+            </form>
+          </details>
+          <p><button class="btn-quiet" id="sign-out">Sign out on this device</button></p>
+        </section>
       </div>
     </div>
   </main>

@@ -8,16 +8,17 @@ const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 const MAX_DECK_BYTES = 200 * 1024 * 1024;
 const MAX_NOTES_CHARS = 20_000;
 const NOTES_KEY = "unpaged.notes"; // "off" once you hide the notes panel
-const PASSCODE_KEY = "unpaged.passcode";
+const TOKEN_KEY = "unpaged.session"; // the signed-in session, kept on this device
 
 const params = new URLSearchParams(location.search);
 const code = (params.get("c") || "").toUpperCase() || null;
 // A projector window: opened from the teaching screen to show the page alone on a second display.
 const isScreen = params.has("screen");
 const clientId = crypto.randomUUID(); // tells this window's own page turns from another window's
-let passcode = "";
+let token = "";
 try {
-  passcode = localStorage.getItem(PASSCODE_KEY) || "";
+  token = localStorage.getItem(TOKEN_KEY) || "";
+  localStorage.removeItem("unpaged.passcode"); // from before instructors had accounts
 } catch {}
 
 let course = null;
@@ -39,19 +40,19 @@ function show(view) {
   $("footer").hidden = view === "room";
 }
 
-// Every instructor request carries the passcode. A 401 sends you back to sign-in.
-async function api(path, options = {}) {
-  const res = await fetch(`/api/courses${path}`, {
+// Every instructor request carries the session. A 401 sends you back to sign-in.
+async function call(path, options = {}) {
+  const res = await fetch(`/api${path}`, {
     ...options,
-    headers: { ...options.headers, Authorization: `Bearer ${passcode}` },
+    headers: { ...options.headers, Authorization: `Bearer ${token}` },
   });
   if (res.status === 401) {
     show("login");
-    throw new Error("Wrong instructor passcode.");
+    throw new Error("Sign in again.");
   }
-  if (res.status === 503) throw new Error("This site has no instructor passcode set up yet. See the README.");
   return res;
 }
+const api = (path, options) => call(`/courses${path}`, options);
 
 const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1) + " MB";
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -76,8 +77,103 @@ async function showCourses() {
       return li;
     }),
   );
+  showAccount(await (await call("/account")).json());
   show("courses");
 }
+
+// ---------- Account ----------
+
+function showAccount(account) {
+  $("who").textContent = account.name;
+  $("worker-now").textContent = account.worker ? `New courses are stored in ${account.worker}.` : "";
+  $("worker-origin").value = account.worker || "";
+  $("worker-key").value = "";
+  $("worker-off").hidden = !account.worker;
+  $("invites").hidden = !account.owner;
+  if (account.owner) showInvites();
+}
+
+// ---------- Invitation codes (site owner) ----------
+
+async function showInvites() {
+  const res = await call("/invites");
+  if (!res.ok) return;
+  $("invite-list").replaceChildren(
+    ...(await res.json()).map((inv) => {
+      const li = document.createElement("li");
+      li.className = inv.usedBy ? "used" : "";
+      const code = document.createElement("code");
+      code.textContent = inv.code;
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = [inv.note, inv.usedBy ? `Used by ${inv.usedBy}` : "Not used yet"].filter(Boolean).join(" · ");
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "btn-quiet";
+      copy.textContent = "Copy link";
+      copy.hidden = Boolean(inv.usedBy);
+      copy.onclick = async () => {
+        await navigator.clipboard.writeText(`${location.origin}/instructor?invite=${inv.code}`);
+        copy.textContent = "Copied";
+        setTimeout(() => (copy.textContent = "Copy link"), 1500);
+      };
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn-quiet";
+      remove.textContent = inv.usedBy ? "Remove" : "Withdraw";
+      remove.onclick = async () => {
+        await call(`/invites/${inv.code}`, { method: "DELETE" });
+        showInvites();
+      };
+      li.append(code, copy, remove, meta);
+      return li;
+    }),
+  );
+}
+
+$("invite-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("invite-error").textContent = "";
+  try {
+    const res = await call("/invites", { method: "POST", body: JSON.stringify({ note: $("invite-note").value }) });
+    if (!res.ok) throw new Error(await res.text());
+    $("invite-note").value = "";
+    showInvites();
+  } catch (err) {
+    $("invite-error").textContent = err.message;
+  }
+});
+
+$("worker-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("worker-error").textContent = "";
+  try {
+    const res = await call("/account/worker", { method: "PUT", body: JSON.stringify({ origin: $("worker-origin").value, key: $("worker-key").value }) });
+    if (!res.ok) throw new Error(await res.text());
+    await showCourses(); // courses already in that Worker are listed now
+  } catch (err) {
+    $("worker-error").textContent = err.message;
+  }
+});
+$("worker-off").addEventListener("click", async () => {
+  if (!confirm("New courses will be stored on this site. Courses already in your Worker stay there, and you will not be able to manage them from here until you enter it again.")) return;
+  const res = await call("/account/worker", { method: "DELETE" });
+  if (res.ok) showAccount(await res.json());
+});
+
+$("password-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("password-error").textContent = "";
+  $("password-done").textContent = "";
+  try {
+    const res = await call("/account/password", { method: "POST", body: JSON.stringify({ current: $("password-current").value, password: $("password-new").value }) });
+    if (!res.ok) throw new Error(await res.text());
+    e.target.reset();
+    $("password-done").textContent = "Changed.";
+  } catch (err) {
+    $("password-error").textContent = err.message;
+  }
+});
 
 $("new-course").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -352,7 +448,7 @@ function syncFull() {
   $("present-full").hidden = !canFull();
 }
 $("present-full").addEventListener("click", fullScreen);
-// The projector window. It signs in with the passcode remembered on this device.
+// The projector window. It uses the sign-in remembered on this device.
 $("screen").addEventListener("click", () => {
   if (!window.open(`/instructor?c=${code}&screen`, "unpaged-screen", "popup,width=1280,height=720")) setConn(false, "Allow pop-ups to open the projector window.");
 });
@@ -512,8 +608,8 @@ function connect() {
 
 async function enter() {
   if (!code) return showCourses();
-  await api(""); // reading a course needs no passcode, so check it here before showing instructor controls
-  if (!(await loadCourse())) {
+  // Anyone can read a course, so check here that it is this instructor's before showing the controls.
+  if (!(await loadCourse()) || !course.mine) {
     location.href = "/instructor";
     return;
   }
@@ -526,27 +622,53 @@ async function enter() {
   }
 }
 
+let signingUp = false;
+function setSigningUp(on) {
+  signingUp = on;
+  $("invite-field").hidden = !signingUp;
+  $("invite").required = signingUp;
+  $("password").autocomplete = signingUp ? "new-password" : "current-password";
+  $("login-submit").textContent = signingUp ? "Create account" : "Sign in";
+  $("login-mode").textContent = signingUp ? "I have an account" : "Create an account";
+  $("login-error").textContent = "";
+}
+$("login-mode").addEventListener("click", () => setSigningUp(!signingUp));
+// An invitation link: /instructor?invite=CODE opens the sign-up form with the code filled in.
+if (params.get("invite")) {
+  setSigningUp(true);
+  $("invite").value = params.get("invite");
+  $("invite").type = "text";
+}
+
 $("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  passcode = $("passcode").value;
   $("login-error").textContent = "";
   try {
-    await enter();
+    const res = await fetch(signingUp ? "/api/signup" : "/api/login", {
+      method: "POST",
+      body: JSON.stringify({ name: $("name").value, password: $("password").value, invite: $("invite").value }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    token = (await res.json()).token;
     try {
-      localStorage.setItem(PASSCODE_KEY, passcode); // remember it on this device
+      localStorage.setItem(TOKEN_KEY, token); // stay signed in on this device
     } catch {}
+    $("password").value = "";
+    $("invite").value = "";
+    await enter();
   } catch (err) {
     $("login-error").textContent = err.message;
   }
 });
-$("sign-out").addEventListener("click", () => {
+$("sign-out").addEventListener("click", async () => {
+  await call("/logout", { method: "POST" }).catch(() => {});
   try {
-    localStorage.removeItem(PASSCODE_KEY);
+    localStorage.removeItem(TOKEN_KEY);
   } catch {}
-  passcode = "";
-  $("passcode").value = "";
+  token = "";
   show("login");
 });
 
-if (passcode) enter().catch(() => show("login"));
+if (params.get("invite")) show("login");
+else if (token) enter().catch(() => show("login"));
 else show("login");

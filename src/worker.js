@@ -38,16 +38,249 @@ const ASSET_HEADERS = {
 
 const text = (body, status = 200) => new Response(body, { status });
 
-// The list of courses, for the instructor's home page.
+const NAME = /^[a-z0-9][a-z0-9._@+-]{2,63}$/;
+const CODE = /^[A-Z0-9]{6}$/;
+const SESSION_MS = 90 * 24 * 3600 * 1000;
+const MAX_FAILS = 10; // wrong passwords in a row before sign-in pauses
+const LOCK_MS = 15 * 60 * 1000;
+
+const bytes = (s) => new TextEncoder().encode(s);
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const sha256 = async (s) => hex(await crypto.subtle.digest("SHA-256", bytes(s)));
+const randomHex = (n) => hex(crypto.getRandomValues(new Uint8Array(n)));
+
+// Compare via digests so timing does not leak how much matched.
+async function same(a, b) {
+  const [x, y] = await Promise.all([crypto.subtle.digest("SHA-256", bytes(a)), crypto.subtle.digest("SHA-256", bytes(b))]);
+  return crypto.subtle.timingSafeEqual(x, y);
+}
+
+async function passwordHash(password, salt) {
+  const key = await crypto.subtle.importKey("raw", bytes(password), "PBKDF2", false, ["deriveBits"]);
+  return hex(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: bytes(salt), iterations: 100_000 }, key, 256));
+}
+
+// Invitation codes are shown as XXXXX-XXXXX and may be typed in any case, with or without the dash.
+const inviteKey = (typed) => "invite:" + String(typed).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 40);
+const inviteView = ({ code, note, created, usedBy }) => ({ code: code.slice(0, 5) + "-" + code.slice(5), note, created, usedBy: usedBy || null });
+
+const bearer = (request) => (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
+
+// Instructor accounts, their sign-in sessions, and the list of courses with who owns each.
+//
+// An instructor signs up with an invitation code. Each code makes one account. Signing up
+// with INSTRUCTOR_KEY instead makes a site-owner account, which creates and withdraws the
+// invitation codes and also owns the courses created before accounts existed.
+//
+// An instructor may keep their courses in their own copy of this Worker. The account then
+// holds that Worker's address and its INSTRUCTOR_KEY, and each of those courses is listed
+// here with the address, so this site can pass requests for it along.
+//
+// Paths under /public are reachable from the internet (as /api/...); the rest are called
+// only by the Worker below.
 export class Directory extends DurableObject {
   async fetch(request) {
-    if (request.method === "POST") {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const method = request.method;
+    const store = this.ctx.storage;
+
+    if (path === "/auth") {
+      const user = await this.userOf(await request.text());
+      return user ? Response.json({ name: user.name, owner: Boolean(user.owner), worker: user.worker || null }) : text("sign in first", 401);
+    }
+
+    const where = path.match(/^\/where\/([A-Z0-9]{6})$/);
+    if (where) {
+      const course = await store.get(`course:${where[1]}`);
+      return course ? Response.json(course) : text("unknown", 404);
+    }
+
+    if (path === "/courses" && method === "POST") {
       const course = await request.json();
-      await this.ctx.storage.put(`course:${course.code}`, course);
+      if (await store.get(`course:${course.code}`)) return text("exists", 409);
+      await store.put(`course:${course.code}`, course);
       return text("ok");
     }
-    const all = [...(await this.ctx.storage.list({ prefix: "course:" })).values()];
-    return Response.json(all.sort((a, b) => b.created - a.created));
+
+    // The courses of one instructor. ?all lists every course (the INSTRUCTOR_KEY itself).
+    if (path === "/courses") {
+      const name = url.searchParams.get("user");
+      const user = name ? await store.get(`user:${name}`) : null;
+      if (user?.worker) await this.importCourses(user);
+      const all = [...(await store.list({ prefix: "course:" })).values()];
+      const mine = url.searchParams.has("all") ? all : all.filter((c) => (c.owner ? c.owner === name : Boolean(user?.owner)));
+      return Response.json(mine.sort((a, b) => b.created - a.created).map(({ code, title, created }) => ({ code, title, created })));
+    }
+
+    if (!path.startsWith("/public/")) return text("not found", 404);
+    const body = method === "GET" ? null : await request.json().catch(() => null);
+    const str = (v) => (typeof v === "string" ? v : "");
+
+    if (path === "/public/signup" && method === "POST") {
+      const { INSTRUCTOR_KEY } = this.env;
+      if (!INSTRUCTOR_KEY) return text("This site is not set up for accounts yet. See the README.", 503);
+      const typed = str(body?.invite).trim();
+      const owner = await same(typed, INSTRUCTOR_KEY);
+      const wrong = () => text("That invitation code is not right, or it has been used.", 403);
+      if (!owner && (await store.get(inviteKey(typed)))?.usedBy !== "") return wrong();
+      const name = str(body?.name).trim().toLowerCase();
+      const password = str(body?.password);
+      if (!NAME.test(name)) return text("Use 3 to 64 letters, digits or . _ @ + - for the name.", 400);
+      if (password.length < 8 || password.length > 200) return text("Use a password of at least 8 characters.", 400);
+      const salt = randomHex(16);
+      const hash = await passwordHash(password, salt);
+      // From here to the last put there is nothing to wait for but storage, so two people
+      // signing up at once cannot take the same name or the same code.
+      if (await store.get(`user:${name}`)) return text("That name is taken.", 409);
+      if (!owner) {
+        const invite = await store.get(inviteKey(typed));
+        if (invite?.usedBy !== "") return wrong();
+        await store.put(inviteKey(typed), { ...invite, usedBy: name, usedAt: Date.now() });
+      }
+      await store.put(`user:${name}`, { name, salt, hash, owner, created: Date.now() });
+      return Response.json({ name, token: await this.newSession(name) });
+    }
+
+    if (path === "/public/login" && method === "POST") {
+      const name = str(body?.name).trim().toLowerCase();
+      const user = NAME.test(name) ? await store.get(`user:${name}`) : null;
+      if (user?.lockedUntil > Date.now()) return text("Too many wrong passwords. Try again in 15 minutes.", 429);
+      // Hash even when there is no such account, so the reply takes as long either way.
+      const hash = await passwordHash(str(body?.password), user?.salt || "none");
+      if (!user || !(await same(hash, user.hash))) {
+        if (user) {
+          user.fails = (user.fails || 0) + 1;
+          if (user.fails >= MAX_FAILS) Object.assign(user, { fails: 0, lockedUntil: Date.now() + LOCK_MS });
+          await store.put(`user:${name}`, user);
+        }
+        return text("Wrong name or password.", 403);
+      }
+      if (user.fails || user.lockedUntil) await store.put(`user:${name}`, { ...user, fails: 0, lockedUntil: 0 });
+      return Response.json({ name, token: await this.newSession(name) });
+    }
+
+    // The site owner sets a new password for someone who forgot theirs.
+    if (path === "/public/account/password" && method === "POST" && body?.key !== undefined) {
+      if (!this.env.INSTRUCTOR_KEY || !(await same(str(body.key), this.env.INSTRUCTOR_KEY))) return text("That key is not right.", 403);
+      const target = await store.get(`user:${str(body.name).trim().toLowerCase()}`);
+      if (!target) return text("No such account.", 404);
+      if (str(body.password).length < 8 || str(body.password).length > 200) return text("Use a password of at least 8 characters.", 400);
+      Object.assign(target, { hash: await passwordHash(body.password, target.salt), fails: 0, lockedUntil: 0 });
+      await store.put(`user:${target.name}`, target);
+      return text("ok");
+    }
+
+    const token = bearer(request);
+    const user = await this.userOf(token);
+    if (!user) return text("sign in first", 401);
+
+    if (path === "/public/logout" && method === "POST") {
+      await store.delete(`session:${await sha256(token)}`);
+      return text("ok");
+    }
+
+    if (path === "/public/account" && method === "GET") {
+      return Response.json({ name: user.name, owner: Boolean(user.owner), worker: user.worker?.origin || null });
+    }
+
+    // Invitation codes: the site-owner accounts create, list and withdraw them.
+    if (path.startsWith("/public/invites")) {
+      if (!user.owner) return text("only the site owner manages invitation codes", 403);
+      if (path === "/public/invites" && method === "GET") {
+        const all = [...(await store.list({ prefix: "invite:" })).values()];
+        return Response.json(all.sort((a, b) => b.created - a.created).map(inviteView));
+      }
+      if (path === "/public/invites" && method === "POST") {
+        if ((await store.list({ prefix: "invite:", limit: 1001 })).size > 1000) return text("Too many invitation codes. Withdraw some first.", 400);
+        const code = [...crypto.getRandomValues(new Uint8Array(10))].map((n) => CODE_ALPHABET[n % 32]).join("");
+        const invite = { code, note: str(body?.note).trim().slice(0, 80), created: Date.now(), by: user.name, usedBy: "" };
+        await store.put(`invite:${code}`, invite);
+        return Response.json(inviteView(invite));
+      }
+      // Withdrawing a used code only removes it from the list; the account stays.
+      if (method === "DELETE") {
+        await store.delete(inviteKey(decodeURIComponent(path.slice("/public/invites/".length))));
+        return text("ok");
+      }
+      return text("not found", 404);
+    }
+
+    if (path === "/public/account/password" && method === "POST") {
+      if (!(await same(await passwordHash(str(body?.current), user.salt), user.hash))) return text("The current password is not right.", 403);
+      if (str(body?.password).length < 8 || str(body.password).length > 200) return text("Use a password of at least 8 characters.", 400);
+      user.hash = await passwordHash(body.password, user.salt);
+      await store.put(`user:${user.name}`, user);
+      return text("ok");
+    }
+
+    if (path === "/public/account/worker" && method === "PUT") {
+      let origin;
+      try {
+        const given = new URL(str(body?.origin).trim());
+        const local = given.hostname === "localhost" || given.hostname === "127.0.0.1";
+        if (given.protocol !== "https:" && !(local && given.protocol === "http:")) throw 0;
+        origin = given.origin;
+      } catch {
+        return text("Enter the address of your Worker, starting with https://", 400);
+      }
+      if (origin === request.headers.get("X-Site-Origin")) return text("That is this site. Enter the address of your own Worker.", 400);
+      const key = str(body?.key);
+      user.worker = { origin, key };
+      if ((await this.importCourses(user)) === null) return text("Could not sign in to that Worker with that key. Check both.", 400);
+      await store.put(`user:${user.name}`, user);
+      return Response.json({ name: user.name, worker: origin });
+    }
+
+    if (path === "/public/account/worker" && method === "DELETE") {
+      delete user.worker;
+      await store.put(`user:${user.name}`, user);
+      return Response.json({ name: user.name, worker: null });
+    }
+
+    return text("not found", 404);
+  }
+
+  async newSession(name) {
+    const token = randomHex(32);
+    await this.ctx.storage.put(`session:${await sha256(token)}`, { name, created: Date.now() });
+    return token;
+  }
+
+  async userOf(token) {
+    if (!token) return null;
+    const key = `session:${await sha256(token)}`;
+    const session = await this.ctx.storage.get(key);
+    if (!session) return null;
+    if (Date.now() - session.created > SESSION_MS) {
+      await this.ctx.storage.delete(key);
+      return null;
+    }
+    return (await this.ctx.storage.get(`user:${session.name}`)) || null;
+  }
+
+  // Lists the courses in an instructor's own Worker here, so that this site can find them.
+  // Covers courses made there directly. Returns null if that Worker did not accept the key.
+  async importCourses(user) {
+    let list;
+    try {
+      const res = await fetch(`${user.worker.origin}/api/courses`, { headers: { Authorization: `Bearer ${user.worker.key}` } });
+      list = res.ok ? await res.json() : null;
+    } catch {
+      list = null;
+    }
+    if (!Array.isArray(list)) return null;
+    for (const c of list.slice(0, 1000)) {
+      if (!CODE.test(c?.code || "") || (await this.ctx.storage.get(`course:${c.code}`))) continue;
+      await this.ctx.storage.put(`course:${c.code}`, {
+        code: c.code,
+        title: String(c.title || "").slice(0, 120),
+        created: Number(c.created) || Date.now(),
+        owner: user.name,
+        worker: user.worker.origin,
+      });
+    }
+    return list.length;
   }
 }
 
@@ -69,25 +302,31 @@ export class Course extends DurableObject {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
-  // The Worker has already checked the passcode: X-Instructor is "1" only for the instructor,
-  // and every non-GET request that reaches this object comes from the instructor, except
-  // POST /answer, which is a student answering a quiz.
+  // The Worker has already checked who is signed in and says so in X-User (an account's name)
+  // or X-Admin (the INSTRUCTOR_KEY itself). The instructor of a course is the account that
+  // created it. A course from before accounts existed belongs to the site-owner accounts.
+  // Only the instructor may change anything, except POST /answer: a student answering a quiz.
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
-    const instructor = request.headers.get("X-Instructor") === "1";
     const store = this.ctx.storage;
     const course = await store.get("course");
 
     if (path === "/init") {
       if (course) return text("exists", 409);
-      const { title } = await request.json();
-      await store.put("course", { title, created: Date.now() });
+      const { title, owner } = await request.json();
+      await store.put("course", { title, owner, created: Date.now() });
       await store.put("decks", []);
       return text("ok");
     }
     if (!course) return text("no such course", 404);
+
+    const who = request.headers.get("X-User");
+    const instructor =
+      request.headers.get("X-Admin") === "1" ||
+      (who !== null && (course.owner ? course.owner === who : request.headers.get("X-Owner") === "1"));
+    if (method !== "GET" && path !== "/answer" && !instructor) return text("not your course", 403);
 
     const decks = (await store.get("decks")) || [];
     const live = (await store.get("live")) || null;
@@ -95,6 +334,7 @@ export class Course extends DurableObject {
     if (path === "/" && method === "GET") {
       return Response.json({
         title: course.title,
+        mine: instructor, // whether the person asking may teach this course
         live: live && (instructor ? live : { deckId: live.deckId }),
         decks: decks.map((d) => ({
           // Students do not get the id of a deck that has not been taught yet.
@@ -377,7 +617,7 @@ export class Course extends DurableObject {
     return new Response(body, { status, headers });
   }
 
-  // Sockets are receive-only: page turns arrive over HTTP with the passcode.
+  // Sockets are receive-only: page turns arrive over HTTP from the signed-in instructor.
   async webSocketMessage() {}
 
   async webSocketClose(ws, code) {
@@ -429,59 +669,104 @@ function quizKey(quiz) {
   return key;
 }
 
-// Compare via digests so timing does not leak how much of the passcode matched.
-async function isInstructor(request, env) {
-  if (!env.INSTRUCTOR_KEY) return false;
-  const given = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
-  const enc = new TextEncoder();
-  const [a, b] = await Promise.all([
-    crypto.subtle.digest("SHA-256", enc.encode(given)),
-    crypto.subtle.digest("SHA-256", enc.encode(env.INSTRUCTOR_KEY)),
-  ]);
-  return crypto.subtle.timingSafeEqual(a, b);
-}
-
 const courseStub = (env, code) => env.COURSE.get(env.COURSE.idFromName(code));
 const directory = (env) => env.DIRECTORY.get(env.DIRECTORY.idFromName("all"));
+
+// Who is asking: null, an account ({ name, owner, worker }), or the INSTRUCTOR_KEY itself
+// ({ admin: true }), which may manage every course in this Worker. Another site uses the key
+// this way when an instructor keeps their courses here.
+async function userOf(request, env) {
+  const given = bearer(request);
+  if (!given) return null;
+  if (env.INSTRUCTOR_KEY && (await same(given, env.INSTRUCTOR_KEY))) return { admin: true };
+  const res = await directory(env).fetch("https://directory/auth", { method: "POST", body: given });
+  return res.ok ? res.json() : null;
+}
+
+// Where each course is kept: { owner, worker }, worker being the address of the owner's own
+// Worker when it is not stored here. This never changes for a course, so it is kept per isolate.
+const homes = new Map();
+async function homeOf(env, code) {
+  if (homes.has(code)) return homes.get(code);
+  const res = await directory(env).fetch(`https://directory/where/${code}`);
+  if (!res.ok) return null; // not remembered: the code may be given to a course later
+  const { owner, worker } = await res.json();
+  homes.set(code, { owner, worker });
+  return homes.get(code);
+}
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (/^\/api\/(signup|login|logout|account(\/worker|\/password)?|invites(\/[A-Za-z0-9-]{1,40})?)$/.test(url.pathname)) {
+      const out = new Request("https://directory/public" + url.pathname.slice("/api".length), request);
+      out.headers.set("X-Site-Origin", url.origin);
+      return directory(env).fetch(out);
+    }
     const m = url.pathname.match(/^\/api\/courses(?:\/([A-Za-z0-9]{6})(\/.*)?)?$/);
     if (!m) return env.ASSETS.fetch(request);
     const code = m[1]?.toUpperCase();
     const sub = m[2] || "/";
+    if (sub === "/init") return text("not found", 404);
 
-    const instructor = await isInstructor(request, env);
+    const user = await userOf(request, env);
     // Students may read, and answer the quiz on the live page. Everything else, and the course
-    // list, needs the instructor passcode.
+    // list, needs a signed-in instructor. The Course then checks that the course is theirs.
     const answering = Boolean(code) && request.method === "POST" && sub === "/answer";
-    if ((request.method !== "GET" && !answering) || !code) {
-      // Fails closed: without a configured passcode nobody can manage courses.
-      if (!env.INSTRUCTOR_KEY) return text("INSTRUCTOR_KEY is not configured", 503);
-      if (!instructor) return text("wrong passcode", 401);
-    }
+    if (((request.method !== "GET" && !answering) || !code) && !user) return text("sign in first", 401);
 
     if (!code) {
-      if (request.method === "GET") return directory(env).fetch("https://directory/");
+      if (request.method === "GET") {
+        return directory(env).fetch(`https://directory/courses?${user.admin ? "all" : "user=" + encodeURIComponent(user.name)}`);
+      }
       if (request.method !== "POST") return text("method not allowed", 405);
       const title = String((await request.json().catch(() => ({}))).title || "").trim().slice(0, 120);
       if (!title) return text("a course needs a title", 400);
+      const register = (course) => directory(env).fetch("https://directory/courses", { method: "POST", body: JSON.stringify(course) });
+
+      // An instructor with their own Worker: the course is created there and listed here.
+      if (user.worker) {
+        const { origin, key } = user.worker;
+        const res = await fetch(`${origin}/api/courses`, { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: JSON.stringify({ title }) }).catch(() => null);
+        const made = res?.ok ? await res.json().catch(() => null) : null;
+        if (!CODE.test(made?.code || "")) return text("Your own Worker did not create the course. Check its address and key.", 502);
+        const course = { code: made.code, title, created: Number(made.created) || Date.now() };
+        if (!(await register({ ...course, owner: user.name, worker: origin })).ok) return text("That course code is already in use here. Try again.", 502);
+        return Response.json(course);
+      }
+
       for (let attempt = 0; attempt < 8; attempt++) {
         const candidate = [...crypto.getRandomValues(new Uint8Array(6))].map((n) => CODE_ALPHABET[n % 32]).join("");
-        const res = await courseStub(env, candidate).fetch("https://course/init", { method: "POST", body: JSON.stringify({ title }) });
-        if (!res.ok) continue;
         const course = { code: candidate, title, created: Date.now() };
-        await directory(env).fetch("https://directory/", { method: "POST", body: JSON.stringify(course) });
+        // Listed first: a code already listed here (for a course kept elsewhere) is skipped.
+        if (!(await register({ ...course, owner: user.name })).ok) continue;
+        const res = await courseStub(env, candidate).fetch("https://course/init", { method: "POST", body: JSON.stringify({ title, owner: user.name }) });
+        if (!res.ok) continue;
         return Response.json(course);
       }
       return text("could not allocate a course code", 503);
     }
 
+    // A course kept in its instructor's own Worker. That Worker's key goes along only for
+    // the instructor who owns the course; nobody's sign-in here is ever sent on.
+    const home = await homeOf(env, code);
+    if (home?.worker) {
+      const mine = Boolean(user?.name) && user.name === home.owner && user.worker?.origin === home.worker;
+      if (request.method !== "GET" && !answering && !mine) return text("not your course", 403);
+      const out = new Request(home.worker + url.pathname + url.search, request);
+      out.headers.delete("Authorization");
+      if (mine) out.headers.set("Authorization", `Bearer ${user.worker.key}`);
+      return fetch(out);
+    }
+
     if (sub === "/ws" && request.headers.get("Upgrade") !== "websocket") return text("expected websocket", 426);
     const forwarded = new Request("https://course" + sub + url.search, request);
-    forwarded.headers.delete("X-Instructor");
-    if (instructor) forwarded.headers.set("X-Instructor", "1");
+    for (const h of ["X-User", "X-Owner", "X-Admin"]) forwarded.headers.delete(h);
+    if (user?.admin) forwarded.headers.set("X-Admin", "1");
+    else if (user) {
+      forwarded.headers.set("X-User", user.name);
+      if (user.owner) forwarded.headers.set("X-Owner", "1");
+    }
     return courseStub(env, code).fetch(forwarded);
   },
 };
