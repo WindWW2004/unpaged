@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!servicerequest/
+!servicerequest/pom.xml
+!servicerequest/src/
+!servicerequest/src/**

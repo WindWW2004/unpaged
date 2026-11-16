@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "unpaged-servicerequest-test",
+  "main": "src/servicerequest-preview.js",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "containers": [{
+    "class_name": "ServiceRequestContainer",
+    "scheduling_policy": "durable_object",
+    "images": { "base": { "dockerfile": "./Dockerfile" } }
+  }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "COURSE", "class_name": "Course" },
+      { "name": "DIRECTORY", "class_name": "Directory" },
+      { "name": "SERVICE_REQUEST", "class_name": "ServiceRequestContainer" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Course", "Directory"] },
+    { "tag": "v2", "new_sqlite_classes": ["ServiceRequestContainer"] }
+  ]
+}

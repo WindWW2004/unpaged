@@ -19,6 +19,20 @@ Set the instructor passcode once (use a long random one): `npx wrangler secret p
 - Instructors: `/instructor` (sign in, create a course, add decks, teach). The guide at `/guide` covers deck format and preparing a class.
 - Students: enter the course code on the home page, or open `/?c=CODE`.
 
+## ServiceRequest test deployment
+
+The Spring Boot demo is mounted at `/servicerequest/` in the test Worker. The original Unpaged home page and course routes use the existing Worker code. The preview has its own Durable Objects and does not use the live site's course data or hostname.
+
+1. In Cloudflare **Workers & Pages**, create a Worker from the GitHub fork, named `unpaged-servicerequest-test`. Cloudflare Containers requires Workers Paid.
+2. In its **Settings > Builds**, use `servicerequest-preview` as this test Worker's production branch and the repository root as its build root. Use `npm run deploy:servicerequest` as the deploy command. Workers Builds installs the locked Wrangler dependencies and builds the Dockerfile during deployment.
+3. Once the deployment and container rollout are ready, open the Worker's `workers.dev` URL with `/servicerequest/` appended. Test the dashboard, CSS, and a sample form submission. The JAR is built in Docker; do not upload `target/` or a JAR.
+
+If you have Docker locally, you can also run `npm ci` and `npm run deploy:servicerequest` from the repository root after signing in to Wrangler. To run only the Java image locally, use `docker build -t unpaged-servicerequest .` and `docker run --rm -p 127.0.0.1:8080:8080 unpaged-servicerequest`, then open `http://localhost:8080/servicerequest/`.
+
+Use demo data only. The app has no user sign-in, the H2 console is disabled, and in-memory H2 data resets when the container stops.
+
+To publish under the shared hostname later, the Unpaged maintainer must review and update the existing Unpaged Worker's configuration. Keep its current Worker name, bindings, and migration history. Change its entry point to `src/servicerequest-preview.js`, add the container and its binding, and append a migration with a new tag for `ServiceRequestContainer`. Keep the existing hostname configuration so the app uses `/servicerequest/` on the same site. This branch does not change the existing `wrangler.jsonc`.
+
 ## Deck format
 
 One HTML file, optionally with media files next to it. Each page is a `<section class="slide">`. A clickable knowledge point is a `.kp`; its details go in a nested `.detail`, which opens in a dialog on click. A quiz is a `.quiz` holding `.option` elements, the right one marked `data-correct`, with an optional `.explain`. Speaker notes for a page go in an `<aside class="notes">`. Media is referenced by relative path. Add a deck as a single `.html`, a `.zip`, or a folder. `public/guide.html` has the full description and `public/sample-deck.html` is a working example.
