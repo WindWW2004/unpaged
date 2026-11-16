@@ -339,6 +339,18 @@ function setPresenting(on) {
   if (on) Promise.resolve($("room").requestFullscreen?.()).catch(() => {});
   else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
+// The controls show while the pointer moves over them and go again soon after it stops or leaves.
+// A timer, not :hover, which can stay stuck once the pointer has moved onto the page in its iframe.
+const nav = $("room").querySelector(".nav");
+let navTimer = 0;
+function wakeNav(on) {
+  clearTimeout(navTimer);
+  nav.classList.toggle("awake", on);
+  if (on) navTimer = setTimeout(wakeNav, 2500, false);
+}
+nav.addEventListener("pointermove", () => wakeNav(true));
+nav.addEventListener("pointerdown", () => wakeNav(true));
+nav.addEventListener("pointerleave", () => wakeNav(false));
 $("present").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
 // Esc in full screen is handled by the browser; follow it.
@@ -376,6 +388,8 @@ function showQuiz() {
   const q = room?.quiz;
   $("answered").hidden = !q;
   $("reveal").hidden = !q || q.revealed;
+  // While presenting, a quiz that is still open keeps its count and Show answers on screen.
+  $("room").classList.toggle("quiz-open", Boolean(q) && !q.revealed);
   if (!q) return;
   $("answered").textContent = `${q.answered} answered` + (q.revealed ? " · answers shown" : "");
   sendQuiz($("stage"), { selected: [], results: q.results });

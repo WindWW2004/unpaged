@@ -105,14 +105,18 @@ iframe.stage { border: 0; width: 100%; height: 100%; display: block; background:
 .notes-body :is(ul, ol) { padding-left: 1.3em; }
 .notes-body blockquote { padding-left: 12px; border-left: 2px solid var(--ss-line); }
 /* Presenting: the page alone fills the screen. The page controls wait, unseen, in the bottom right corner
-   and show when the pointer is over them. */
+   and show while the pointer moves over them (.awake, set in instructor.js). */
 #room.presenting { grid-template: "stage" minmax(0, 1fr) / minmax(0, 1fr); }
 #room.presenting > :is(.bar, .page-list, .notes) { display: none; }
 #room.presenting .stage-wrap { padding: 0; }
 #room.presenting iframe.stage { border: 0; border-radius: 0; }
 #room.presenting .nav { position: absolute; grid-area: auto; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); flex-wrap: nowrap; gap: 8px; padding: 6px 8px; background: var(--ss-card); border: 1px solid var(--ss-line); border-radius: 999px; box-shadow: var(--ss-shadow); opacity: 0; transition: opacity .2s; }
-#room.presenting .nav:is(:hover, :has(:focus-visible)) { opacity: 1; }
+#room.presenting .nav:is(.awake, :has(:focus-visible)) { opacity: 1; }
 @media (hover: none) { #room.presenting .nav { opacity: .3; } }
+/* A quiz waiting for its answers keeps the count and Show answers in view; the rest still waits for the pointer. */
+#room.presenting.quiz-open .nav { opacity: 1; }
+#room.presenting.quiz-open .nav:not(.awake, :has(:focus-visible)) > :not(.quiz-stat, #reveal) { display: none; }
+#room.presenting.quiz-open .nav:not(.awake, :has(:focus-visible)) .quiz-stat { padding: 0 6px 0 12px; border: 0; }
 /* Holds the print version of a deck while the print dialog is open. Never seen. */
 .print-frame { position: fixed; top: 0; left: 0; width: 1280px; height: 720px; border: 0; opacity: 0; pointer-events: none; z-index: -1; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #9b2c1b; margin-right: 6px; }
