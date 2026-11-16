@@ -327,6 +327,25 @@ function toggleNotes() {
 }
 $("notes-toggle").addEventListener("click", toggleNotes);
 
+// Presenting: only the page, full screen, for when your screen is the one on the projector.
+// The page list, notes and bars go away; the arrow keys still turn pages.
+let presenting = false;
+function setPresenting(on) {
+  if (!room) on = false;
+  presenting = on;
+  $("room").classList.toggle("presenting", on);
+  $("present-exit").hidden = !on;
+  // Without full screen (an iPhone, say) the page still fills the window.
+  if (on) Promise.resolve($("room").requestFullscreen?.()).catch(() => {});
+  else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+$("present").addEventListener("click", () => setPresenting(true));
+$("present-exit").addEventListener("click", () => setPresenting(false));
+// Esc in full screen is handled by the browser; follow it.
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && presenting) setPresenting(false);
+});
+
 async function go(index, publish = true) {
   if (!room || index < 0 || index >= room.pages.length || index === room.index) return;
   room.index = index;
@@ -381,6 +400,7 @@ function setConn(ok, label) {
 $("prev").addEventListener("click", () => go(room.index - 1));
 $("next").addEventListener("click", () => go(room.index + 1));
 $("leave").addEventListener("click", async () => {
+  setPresenting(false);
   room = null;
   await loadCourse();
   show("course");
@@ -389,6 +409,7 @@ $("end").addEventListener("click", async () => {
   if (!confirm("End this class? The deck then opens to students, who can browse it on their own.")) return;
   const res = await api(`/${code}/end`, { method: "POST" });
   if (!res.ok) return setConn(false, "Could not end the class. Try again.");
+  setPresenting(false);
   room = null;
   await loadCourse();
   show("course");
@@ -402,7 +423,10 @@ function onKey(key) {
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input, textarea")) return;
   onKey(e.key);
-  if (room && (e.key === "n" || e.key === "N") && !e.metaKey && !e.ctrlKey && !e.altKey) toggleNotes();
+  if (!room || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "n" || e.key === "N") toggleNotes();
+  if (e.key === "f" || e.key === "F") setPresenting(!presenting);
+  if (e.key === "Escape") setPresenting(false);
 });
 // Arrow keys pressed while focus is inside the page iframe.
 window.addEventListener("message", (e) => {
