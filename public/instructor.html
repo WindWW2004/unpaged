@@ -140,12 +140,16 @@
       <div class="notes-body" id="notes-body"></div>
     </aside>
     <div class="nav">
-      <button class="ss-btn ss-btn--ghost" id="prev">← Previous</button>
-      <span class="pos" id="pos"></span>
-      <button class="ss-btn" id="next">Next →</button>
-      <span class="stat quiz-stat" id="answered" role="status" hidden></span>
-      <button class="ss-btn ss-btn--ghost" id="reveal" hidden>Show answers</button>
-      <button class="btn-quiet" id="present-exit" title="Leave presenting (Esc)" hidden>Exit</button>
+      <div class="pager">
+        <button class="ss-btn ss-btn--ghost" id="prev">← Previous</button>
+        <span class="pos" id="pos"></span>
+        <button class="ss-btn" id="next">Next →</button>
+        <button class="btn-quiet" id="present-exit" title="Leave presenting (Esc)" hidden>Exit</button>
+      </div>
+      <div class="quiz-ctl" id="quiz-ctl" hidden>
+        <span class="stat quiz-stat" id="answered" role="status"></span>
+        <button class="ss-btn ss-btn--ghost" id="reveal" hidden>Show answers</button>
+      </div>
     </div>
   </div>
 

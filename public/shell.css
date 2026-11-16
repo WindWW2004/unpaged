@@ -104,19 +104,24 @@ iframe.stage { border: 0; width: 100%; height: 100%; display: block; background:
 .notes-body > * + * { margin-top: .6em; }
 .notes-body :is(ul, ol) { padding-left: 1.3em; }
 .notes-body blockquote { padding-left: 12px; border-left: 2px solid var(--ss-line); }
-/* Presenting: the page alone fills the screen. The page controls wait, unseen, in the bottom right corner
-   and show while the pointer moves over them (.awake, set in instructor.js). */
+/* Teaching controls. Previous and Next hold the middle; the quiz count and Show answers come and go
+   beside them without moving them. */
+#room .nav { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+#room .nav :is(.pager, .quiz-ctl) { display: flex; align-items: center; gap: 14px; white-space: nowrap; }
+#room .nav .pager { grid-column: 2; }
+#room .nav .quiz-ctl { grid-column: 3; justify-self: start; }
+/* Presenting: the page alone fills the screen. Previous, Next and Exit wait, unseen, in the bottom right
+   corner and show while the pointer moves over them (.awake, set in instructor.js). A quiz waiting for
+   its answers keeps the count and Show answers in view, in their own strip just above. */
 #room.presenting { grid-template: "stage" minmax(0, 1fr) / minmax(0, 1fr); }
 #room.presenting > :is(.bar, .page-list, .notes) { display: none; }
 #room.presenting .stage-wrap { padding: 0; }
 #room.presenting iframe.stage { border: 0; border-radius: 0; }
-#room.presenting .nav { position: absolute; grid-area: auto; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); flex-wrap: nowrap; gap: 8px; padding: 6px 8px; background: var(--ss-card); border: 1px solid var(--ss-line); border-radius: 999px; box-shadow: var(--ss-shadow); opacity: 0; transition: opacity .2s; }
-#room.presenting .nav:is(.awake, :has(:focus-visible)) { opacity: 1; }
-@media (hover: none) { #room.presenting .nav { opacity: .3; } }
-/* A quiz waiting for its answers keeps the count and Show answers in view; the rest still waits for the pointer. */
-#room.presenting.quiz-open .nav { opacity: 1; }
-#room.presenting.quiz-open .nav:not(.awake, :has(:focus-visible)) > :not(.quiz-stat, #reveal) { display: none; }
-#room.presenting.quiz-open .nav:not(.awake, :has(:focus-visible)) .quiz-stat { padding: 0 6px 0 12px; border: 0; }
+#room.presenting .nav { position: absolute; grid-area: auto; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px; padding: 0; background: none; border: 0; }
+#room.presenting .nav :is(.pager, .quiz-ctl) { gap: 8px; min-height: 58px; padding: 6px 8px; background: var(--ss-card); border: 1px solid var(--ss-line); border-radius: 999px; box-shadow: var(--ss-shadow); opacity: 0; transition: opacity .2s; }
+#room.presenting .nav .quiz-stat { padding: 0 8px 0 12px; border: 0; }
+#room.presenting .nav:is(.awake, :has(:focus-visible)) > *, #room.presenting.quiz-open .quiz-ctl { opacity: 1; }
+@media (hover: none) { #room.presenting .nav .pager { opacity: .3; } }
 /* Holds the print version of a deck while the print dialog is open. Never seen. */
 .print-frame { position: fixed; top: 0; left: 0; width: 1280px; height: 720px; border: 0; opacity: 0; pointer-events: none; z-index: -1; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #9b2c1b; margin-right: 6px; }
@@ -135,6 +140,19 @@ iframe.stage { border: 0; width: 100%; height: 100%; display: block; background:
 .prose th, .prose td { text-align: left; vertical-align: top; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--ss-line); }
 .prose th { font-size: 14px; color: var(--ss-muted); font-weight: 600; }
 
+/* Where there is no room beside Previous and Next, the quiz strip sits above them instead. */
+@media (max-width: 1449px) {
+  #room.has-notes:not(.presenting) .nav { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+  #room.has-notes:not(.presenting) .nav :is(.pager, .quiz-ctl) { grid-column: 1; }
+  #room.has-notes:not(.presenting) .nav .quiz-ctl { order: -1; justify-self: center; }
+  #room.has-notes:not(.presenting) .nav .quiz-stat { padding-left: 0; border-left: 0; }
+}
+@media (max-width: 1119px) {
+  #room:not(.presenting) .nav { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+  #room:not(.presenting) .nav :is(.pager, .quiz-ctl) { grid-column: 1; }
+  #room:not(.presenting) .nav .quiz-ctl { order: -1; justify-self: center; }
+  #room:not(.presenting) .nav .quiz-stat { padding-left: 0; border-left: 0; }
+}
 @media (max-width: 1100px) {
   .viewer.with-list.has-notes { grid-template: "bar bar" auto "list stage" minmax(0, 1fr) "list notes" auto "list nav" auto / 240px minmax(0, 1fr); }
   .notes { max-height: 30vh; border-left: 0; border-top: 1px solid var(--ss-line); margin-bottom: 12px; }

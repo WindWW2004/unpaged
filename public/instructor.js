@@ -386,7 +386,7 @@ async function go(index, publish = true) {
 // Quiz controls under the page: how many students have answered, and the button that shows the answers.
 function showQuiz() {
   const q = room?.quiz;
-  $("answered").hidden = !q;
+  $("quiz-ctl").hidden = !q;
   $("reveal").hidden = !q || q.revealed;
   // While presenting, a quiz that is still open keeps its count and Show answers on screen.
   $("room").classList.toggle("quiz-open", Boolean(q) && !q.revealed);
