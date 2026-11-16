@@ -146,11 +146,15 @@ export class Course extends DurableObject {
     if (path === "/goto" && method === "POST") {
       if (!live) return text("no class is live", 409);
       const deck = decks.find((d) => d.id === live.deckId);
-      const index = Number((await request.json()).index);
+      const body = await request.json();
+      const index = Number(body.index);
       if (!Number.isInteger(index) || index < 0 || index >= deck.pages.length) return text("bad page", 400);
       live.index = index;
       await store.put("live", live);
       this.broadcastRaw(await this.slideMessage(decks, live), "student");
+      // The instructor's other windows (a projector window, a phone used as a remote) follow too.
+      // "from" lets the window that turned the page ignore its own echo.
+      this.broadcastRaw(JSON.stringify({ type: "goto", deckId: live.deckId, index, from: String(body.from || "").slice(0, 40) }), "instructor");
       return text("ok");
     }
 

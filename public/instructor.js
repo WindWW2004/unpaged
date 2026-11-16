@@ -10,7 +10,11 @@ const MAX_NOTES_CHARS = 20_000;
 const NOTES_KEY = "unpaged.notes"; // "off" once you hide the notes panel
 const PASSCODE_KEY = "unpaged.passcode";
 
-const code = (new URLSearchParams(location.search).get("c") || "").toUpperCase() || null;
+const params = new URLSearchParams(location.search);
+const code = (params.get("c") || "").toUpperCase() || null;
+// A projector window: opened from the teaching screen to show the page alone on a second display.
+const isScreen = params.has("screen");
+const clientId = crypto.randomUUID(); // tells this window's own page turns from another window's
 let passcode = "";
 try {
   passcode = localStorage.getItem(PASSCODE_KEY) || "";
@@ -335,10 +339,23 @@ function setPresenting(on) {
   presenting = on;
   $("room").classList.toggle("presenting", on);
   $("present-exit").hidden = !on;
-  // Without full screen (an iPhone, say) the page still fills the window.
-  if (on) Promise.resolve($("room").requestFullscreen?.()).catch(() => {});
+  if (on) fullScreen();
   else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  syncFull();
 }
+// Without full screen (an iPhone, or a window that opened without a click) the page still fills the window.
+function fullScreen() {
+  Promise.resolve($("room").requestFullscreen?.()).catch(() => {}).then(syncFull);
+}
+const canFull = () => presenting && !document.fullscreenElement && Boolean(document.fullscreenEnabled);
+function syncFull() {
+  $("present-full").hidden = !canFull();
+}
+$("present-full").addEventListener("click", fullScreen);
+// The projector window. It signs in with the passcode remembered on this device.
+$("screen").addEventListener("click", () => {
+  if (!window.open(`/instructor?c=${code}&screen`, "unpaged-screen", "popup,width=1280,height=720")) setConn(false, "Allow pop-ups to open the projector window.");
+});
 // The controls show while the pointer moves over them and go again soon after it stops or leaves.
 // A timer, not :hover, which can stay stuck once the pointer has moved onto the page in its iframe.
 const nav = $("room").querySelector(".nav");
@@ -354,14 +371,16 @@ nav.addEventListener("pointerleave", () => wakeNav(false));
 $("present").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
 // Esc in full screen is handled by the browser; follow it.
+// A projector window keeps showing the page alone.
 document.addEventListener("fullscreenchange", () => {
-  if (!document.fullscreenElement && presenting) setPresenting(false);
+  if (!document.fullscreenElement && presenting && !isScreen) setPresenting(false);
+  syncFull();
 });
 
 async function go(index, publish = true) {
   if (!room || index < 0 || index >= room.pages.length || index === room.index) return;
   room.index = index;
-  $("pos").textContent = `${index + 1} / ${room.pages.length}`;
+  $("pos").textContent = $("present-pos").textContent = `${index + 1} / ${room.pages.length}`;
   $("prev").disabled = index === 0;
   $("next").disabled = index === room.pages.length - 1;
   [...$("page-list").children].forEach((b, i) => {
@@ -369,7 +388,7 @@ async function go(index, publish = true) {
     if (i === index) b.scrollIntoView({ block: "nearest" });
   });
   // Students first; your own preview loads alongside.
-  const sent = publish ? api(`/${code}/goto`, { method: "POST", body: JSON.stringify({ index }) }) : null;
+  const sent = publish ? api(`/${code}/goto`, { method: "POST", body: JSON.stringify({ index, from: clientId }) }) : null;
   showNotes(index).catch(() => {});
   const html = await pageHtml(index);
   if (room?.index !== index) return;
@@ -439,8 +458,8 @@ document.addEventListener("keydown", (e) => {
   onKey(e.key);
   if (!room || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "n" || e.key === "N") toggleNotes();
-  if (e.key === "f" || e.key === "F") setPresenting(!presenting);
-  if (e.key === "Escape") setPresenting(false);
+  if (e.key === "f" || e.key === "F") canFull() ? fullScreen() : setPresenting(!presenting);
+  if (e.key === "Escape" && !isScreen) setPresenting(false);
 });
 // Arrow keys pressed while focus is inside the page iframe.
 window.addEventListener("message", (e) => {
@@ -463,6 +482,19 @@ function connect() {
     if (e.data === "pong") return;
     const msg = JSON.parse(e.data);
     if (msg.type === "count") $("count").textContent = msg.students;
+    // Another of your windows turned the page, showed the answers or ended the class.
+    if (msg.type === "goto" && room && msg.deckId === room.deckId && msg.from !== clientId) go(msg.index, false);
+    if (msg.type === "reveal" && room?.quiz && msg.deckId === room.deckId && msg.page === room.index) {
+      room.quiz.revealed = true;
+      room.quiz.results = msg.results;
+      showQuiz();
+    }
+    if (msg.type === "end" && room) {
+      if (isScreen) window.close();
+      setPresenting(false);
+      room = null;
+      loadCourse().then(() => show("course"));
+    }
     if (msg.type === "answered" && room?.quiz && msg.page === room.index) {
       room.quiz.answered = msg.count;
       showQuiz();
@@ -487,6 +519,11 @@ async function enter() {
   }
   show("course");
   connect();
+  if (isScreen && course.live) {
+    await startClass(course.decks.find((d) => d.id === course.live.deckId));
+    setPresenting(true);
+    wakeNav(true); // show the controls for a moment, with Full screen among them
+  }
 }
 
 $("login-form").addEventListener("submit", async (e) => {
