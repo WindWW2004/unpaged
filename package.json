@@ -4,8 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "deploy:servicerequest": "wrangler deploy --config wrangler.servicerequest.jsonc"
+    "deploy": "wrangler deploy"
   },
   "devDependencies": {
     "wrangler": "^4"
