@@ -27,6 +27,17 @@
   <script src="course.js" defer></script>
 </head>
 <body>
+<nav class="course-controls" aria-label="Slide navigation" hidden>
+  <div class="course-control-row">
+    <label for="slide-picker">Slide outline</label>
+    <select id="slide-picker" aria-label="Slide outline"></select>
+    <div class="course-pagination">
+      <button type="button" id="previous-slide">← Previous</button>
+      <span id="slide-position" aria-live="polite" aria-atomic="true"></span>
+      <button type="button" id="next-slide">Next →</button>
+    </div>
+  </div>
+</nav>
 <section class="slide">
 <h1>Generative AI</h1>
 <p class="course-label">CSC 466 · Week 13 · Prof. Tao Wang</p><p>From foundation models to multimodal generation</p><div class="media-grid"><figure class="source-figure"><img src="media/slide-01-figure-1.png" alt="Cover illustration showing text, image, audio, and video generated from a model."></figure></div>

@@ -5,6 +5,47 @@ body {
   color: #192721;
   font: 1rem/1.6 "IBM Plex Sans", system-ui, sans-serif;
 }
+.course-controls {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+  border-bottom: 1px solid #c9d9d1;
+}
+.course-control-row {
+  max-width: 68rem;
+  margin: auto;
+  padding: .65rem .75rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem .75rem;
+}
+.course-control-row label { font-weight: 650; }
+.course-control-row select {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.course-pagination {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+}
+.course-control-row :is(button, select) {
+  min-height: 2.75rem;
+  padding: .4rem .65rem;
+  border: 1px solid #9db8aa;
+  border-radius: .45rem;
+  background: #fff;
+  color: #00584a;
+  font: inherit;
+}
+.course-control-row button:not(:disabled) { cursor: pointer; }
+.course-control-row button:disabled { opacity: .45; }
+#next-slide:not(:disabled) { background: #00584a; color: #fff; }
+#slide-position { min-width: 4.5rem; text-align: center; font-variant-numeric: tabular-nums; }
 .slide {
   max-width: 68rem;
   margin: clamp(.75rem, 3vw, 2rem) auto;

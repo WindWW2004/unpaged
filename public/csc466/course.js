@@ -1,3 +1,56 @@
+const slides = [...document.querySelectorAll("body > section.slide")];
+const controls = document.querySelector(".course-controls");
+const picker = document.getElementById("slide-picker");
+const previous = document.getElementById("previous-slide");
+const next = document.getElementById("next-slide");
+const position = document.getElementById("slide-position");
+let activeSlide = 0;
+
+slides.forEach((slide, index) => {
+  const title = slide.querySelector("h1, h2")?.textContent.trim();
+  picker.add(new Option(title ? `${index + 1}. ${title}` : `Slide ${index + 1}`, String(index)));
+});
+
+function showSlide(index) {
+  slides[activeSlide].hidden = true;
+  activeSlide = index;
+  slides[index].hidden = false;
+  picker.value = String(index);
+  position.textContent = `${index + 1} of ${slides.length}`;
+  previous.disabled = index === 0;
+  next.disabled = index === slides.length - 1;
+  window.scrollTo(0, 0);
+}
+
+function goToSlide(index) {
+  if (index < 0 || index >= slides.length || index === activeSlide) return;
+  window.history.pushState(null, "", `#slide-${index + 1}`);
+  showSlide(index);
+}
+
+function restoreSlide() {
+  const match = /^#slide-(\d+)$/.exec(window.location.hash);
+  const index = match ? Number(match[1]) - 1 : 0;
+  showSlide(index >= 0 && index < slides.length ? index : 0);
+}
+
+if (slides.length) {
+  slides.forEach((slide) => { slide.hidden = true; });
+  restoreSlide();
+  controls.hidden = false;
+  previous.addEventListener("click", () => goToSlide(activeSlide - 1));
+  next.addEventListener("click", () => goToSlide(activeSlide + 1));
+  picker.addEventListener("change", () => goToSlide(Number(picker.value)));
+  window.addEventListener("hashchange", restoreSlide);
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey ||
+        event.target.closest("select, input, textarea, [contenteditable], .table-scroll")) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    goToSlide(activeSlide + (event.key === "ArrowRight" ? 1 : -1));
+  });
+}
+
 for (const card of document.querySelectorAll("div.kp")) {
   const heading = card.querySelector(":scope > h3");
   const caption = card.querySelector(":scope > p");
