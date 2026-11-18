@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Generative AI</title>
+  <style>
+    /* Optional. Everything here is included on every page.
+       Unpaged already styles headings, text, cards and quizzes. */
+    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: clamp(16px, 3vw, 40px); align-items: center; }
+    .notes { display: none; }
+  </style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+ .notes,.kp .detail,.quiz .explain{display:none}
+ .media-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(15rem,100%),1fr));gap:1rem;align-items:start}
+ .source-figure{margin:.6rem 0;min-width:0}
+ .source-figure img{display:block;max-width:100%;height:auto;max-height:42vh;object-fit:contain;margin-inline:auto}
+ .source-figure figcaption{font-size:.86em;line-height:1.35;margin-top:.4em}
+ .table-scroll{overflow-x:auto;margin:.6em 0}
+ table{border-collapse:collapse;width:100%;font-size:.88em}
+ th,td{border:1px solid #b7c9bf;text-align:left;padding:.38em .55em;vertical-align:top}
+ th{background:#e8f3ec;color:#153e2c}
+ .course-label{font-size:.88em;color:#40584c}
+ .activity-followup{font-size:.9em}
+</style>
+  <link rel="stylesheet" href="course.css">
+  <script src="course.js" defer></script>
+</head>
+<body>
+<section class="slide">
+<h1>Generative AI</h1>
+<p class="course-label">CSC 466 · Week 13 · Prof. Tao Wang</p><p>From foundation models to multimodal generation</p><div class="media-grid"><figure class="source-figure"><img src="media/slide-01-figure-1.png" alt="Cover illustration showing text, image, audio, and video generated from a model."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Learning Outcomes</h2>
+<ul><li>Distinguish structured generation from predicting a label or a number.</li><li>Compare autoregressive models, VAEs, GANs, diffusion, and flow matching.</li><li>Explain how decoding and post-training affect an LLM’s output.</li><li>Design a prompt and evaluate the answer against explicit criteria.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Opening question: prediction or generation?</h2>
+<div class="quiz"><p>Which task most clearly calls for several valid structured outputs?</p><button class="option" type="button">A. Classify a message as spam</button><button class="option" type="button">B. Estimate one house price</button><button class="option" type="button" data-correct>C. Sketch three plausible layouts for one house</button><button class="option" type="button">D. Classify a photo as indoor or outdoor</button><div class="explain"><p>Different layouts can all satisfy the same design constraints. The other tasks ask for a label or single estimate.</p></div></div>
+
+</section>
+
+<section class="slide">
+<h2>Predictive and Generative AI</h2>
+<ul><li>Generative AI creates new structured content</li><li>Modern systems are usually based on large pretrained foundation models</li></ul><div class="table-scroll" tabindex="0" aria-label="Scrollable comparison table"><table><thead><tr><th scope="col">Dimension</th><th scope="col">Predictive AI</th><th scope="col">Generative AI</th></tr></thead><tbody><tr><td>Primary output</td><td>A label, score, or number</td><td>New structured data</td></tr><tr><td>Typical question</td><td>Is this email spam?</td><td>Write a professional email</td></tr><tr><td>Mapping</td><td>Often x → y</td><td>Models p(x) or p(x|c)</td></tr><tr><td>Valid answers</td><td>Often one expected target</td><td>Often many acceptable outputs</td></tr><tr><td>Values</td><td>Estimate a house price</td><td>Create several house designs</td></tr></tbody></table></div>
+
+</section>
+
+<section class="slide">
+<h2>What Can Generative AI Produce?</h2>
+<ul><li>Text and code: summaries, explanations, translations, and tests.</li><li>Images and video: illustrations, edits, and generated clips.</li><li>Audio: synthetic speech, music, or sound effects.</li><li>Synthetic data: simulated examples for testing or augmentation.</li><li>Scientific design: candidate structures that still require validation.</li><li>World models: plausible future observations for planning or simulation.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Generative Modeling</h2>
+<ul><li>Unconditional generation:</li><li>A model learns a distribution representing possible data. p(x)</li><li>E.g. new cat images</li><li>Conditioned generation:</li><li>A model produces output based on an instruction or condition. p(x|c)</li><li>E.g. cats play soccer</li><li>Characteristics:</li><li>The output is high-dimensional and structured</li><li>One input can have many valid outputs</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-06-figure-1.png" alt="Schematic of learning a distribution and sampling from it; examples show generated cats playing soccer. Panel 1."></figure>
+<figure class="source-figure"><img src="media/slide-06-figure-2.png" alt="Schematic of learning a distribution and sampling from it; examples show generated cats playing soccer. Panel 2."></figure>
+<figure class="source-figure"><img src="media/slide-06-figure-3.png" alt="Schematic of learning a distribution and sampling from it; examples show generated cats playing soccer. Panel 3."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Data Diversity and Bias</h2>
+<ul><li>These face grids illustrate variation in appearance and capture conditions.</li><li>More visible variety alone does not establish fairness.</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-07-figure-1.png" alt="Two face grids showing different degrees of variation in pose, lighting, and appearance. Panel 1."></figure>
+<figure class="source-figure"><img src="media/slide-07-figure-2.png" alt="Two face grids showing different degrees of variation in pose, lighting, and appearance. Panel 2."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Rare Conditions and Distribution Shift</h2>
+<p>A model trained mostly on common conditions can fail on rare ones.</p><div class="media-grid"><figure class="source-figure"><img src="media/slide-08-figure-1.png" alt="Schematic driving distribution with typical highway conditions and three rare scenarios."><figcaption>Toy training set: mostly clear weather and straight highways. The photos show examples of an unusual event, harsh weather, and pedestrians; no frequency is measured.</figcaption></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Why generative models?</h2>
+<p>Generative models can sample new instances from a learned distribution.</p><div class="media-grid"><figure class="source-figure"><img src="media/slide-09-figure-1.png" alt="A conceptual sampling curve and examples of language, media, and scientific structures."><figcaption>A learned distribution can produce multiple plausible samples, including text and images. The curve is schematic.</figcaption></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Major Generative Model Families</h2>
+<p>Select a card for an example or explanation.</p><div class="kps"><div class="kp"><h3>Autoregressive</h3><p>Predict the next unit from a prefix.</p><div class="detail"><h2>Autoregressive</h2><p>A text model samples a token, appends it, and predicts again.</p></div></div><div class="kp"><h3>VAE</h3><p>Learn a probabilistic latent space.</p><div class="detail"><h2>VAE</h2><p>During generation, sample a latent vector from the prior, then decode it.</p></div></div><div class="kp"><h3>GAN</h3><p>Train a generator against a discriminator.</p><div class="detail"><h2>GAN</h2><p>The discriminator learns to distinguish real examples from generated ones, providing a training signal to the generator.</p></div></div><div class="kp"><h3>Diffusion</h3><p>Learn to reverse a noising process.</p><div class="detail"><h2>Diffusion</h2><p>Start with noise and iteratively apply learned reverse updates. Diffusion can operate on autoencoder latents.</p></div></div><div class="kp"><h3>Flow matching</h3><p>Learn a velocity field that transports samples.</p><div class="detail"><h2>Flow matching</h2><p>A sampler follows the learned velocity field from initial noise toward the data distribution.</p></div></div></div>
+
+</section>
+
+<section class="slide">
+<h2>Check: generative mechanisms</h2>
+<div class="quiz"><p>Which model learns a velocity field for transporting samples?</p><button class="option" type="button">A. A GAN discriminator</button><button class="option" type="button">B. An autoregressive decoder</button><button class="option" type="button" data-correct>C. A flow-matching model</button><button class="option" type="button">D. A deterministic reconstruction autoencoder</button><div class="explain"><p>Flow matching learns a velocity field. A sampler follows it from an initial distribution toward the data distribution.</p></div></div>
+
+</section>
+
+<section class="slide">
+<h2>Autoregressive models</h2>
+<ul><li>Autoregressive models generate one unit at a time, conditioned on earlier units.</li><li>For a sequence x₁,…,xₙ: P(x₁,…,xₙ) = ∏ₜ P(xₜ | x₁,…,xₜ₋₁), with t running from 1 to n.</li><li>For text, the unit is usually a token. “Artificial intelligence can” might continue with “help”; the extended prefix might then lead to “people”.</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-11-figure-1.png" alt="Examples of products based on language models."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Autoencoders</h2>
+<ul><li>An encoder maps input x to a latent representation z.</li><li>A decoder maps z to a reconstruction x̂.</li><li>A standard deterministic autoencoder learns to reconstruct its input.</li><li>Toy dimensions: 28 × 28 grayscale pixels = 784 input values.</li><li>The encoder might produce 16 latent features.</li><li>The decoder returns 784 values, which can be reshaped to 28 × 28.</li><li>The digit grid illustrates imperfect reconstructions.</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-12-figure-1.png" alt="Handwritten digit samples and blurred reconstructions."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Variational Autoencoder (VAE)</h2>
+<ul><li>Training: encode x as parameters of q(z | x), sample z, then reconstruct x.</li><li>For a Gaussian encoder, the parameters are a mean and a scale for each latent feature.</li><li>The loss balances reconstruction quality with regularization toward the prior p(z).</li><li>Generation: sample z from the prior, often a standard normal, and decode it. No input image is needed.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Generative adversarial network (GAN)</h2>
+<ul><li>A GAN contains two neural networks:</li><li>Generator: creates synthetic examples.</li><li>Discriminator: determines whether an example is real or generated.</li><li>Two networks compete each other during training:</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-14-figure-1.png" alt="GAN diagram: generated and real examples are evaluated by a discriminator."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Denoising Diffusion (DDPM)</h2>
+<ul><li>Training: take a real example x₀, choose a timestep t, and create xₜ by adding scheduled Gaussian noise.</li><li>A common DDPM objective trains the network to predict the added noise from xₜ and t.</li><li>Generation: start from fresh noise xₜ at t = T. Use learned reverse updates repeatedly to produce a new sample x̂₀.</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-15-figure-1.png" alt="Forward noising runs from a clean sample toward noise; learned reverse updates generate a new sample."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Latent Diffusion: Training and Generation</h2>
+<ul><li>Training: encode an image into a compact latent. Add noise to that latent and train a denoiser.</li><li>Text conditioning: the denoiser can use a representation of the prompt during reverse updates.</li><li>Text-to-image generation: draw fresh latent noise, denoise it with the prompt, then decode the final latent to pixels.</li><li>Image-to-image editing can instead start from a noised encoding of an existing image.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Check: latent diffusion</h2>
+<div class="quiz"><p>Where does ordinary text-to-image latent diffusion start at inference?</p><button class="option" type="button">A. An encoding of the target image</button><button class="option" type="button" data-correct>B. Fresh noise in latent space</button><button class="option" type="button">C. An image discriminator’s label</button><button class="option" type="button">D. The training image before noise is applied</button><div class="explain"><p>The sampler starts with fresh latent noise and uses the prompt as a condition. A decoder converts the final latent to pixels.</p></div></div>
+
+</section>
+
+<section class="slide">
+<h2>Generative AI Model Lifecycle</h2>
+<ul><li>Pretraining: learn from a large dataset using an objective suited to the model.</li><li>Base model: the result of pretraining before task-specific or assistant adaptation.</li><li>Post-training: adapt the model with demonstrations, preferences, or other feedback when needed.</li><li>Inference: keep weights fixed and produce an output from a prompt or other input.</li><li>Evaluation: test held-out tasks after each stage that changes the model or its use.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>From Specialized Models to Foundation Models</h2>
+<ul><li>A task-specific model is usually trained and evaluated for a defined output, such as a sentiment label.</li><li>A foundation model is pretrained for reuse across a range of downstream tasks.</li><li>Reuse can involve a task head, fine-tuning, or instructions and examples at inference.</li><li>Example: a pretrained language model can be adapted for sentiment classification or prompted to summarize a report.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>How an LLM Generates Text</h2>
+<ul><li>1. Tokenize the prompt.</li><li>2. Run the model to get next-token logits.</li><li>3. Convert logits to probabilities and apply a decoding rule.</li><li>4. Append the selected token and repeat until a stop condition.</li><li>Toy example: “A teddy bear is …”</li><li>The graph shows one step, not a score for the complete answer.</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-19-figure-1.png" alt="Illustrative next-token distribution for the prefix “A teddy bear is”."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Greedy Decoding</h2>
+<ul><li>At each step, choose the highest-probability next token.</li><li>The best local choice need not produce the best complete sequence.</li><li>Example prefix:</li><li>“A teddy bear is …”</li><li>Pick the tallest bar.</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-20-figure-1.png" alt="Illustrative next-token scores for greedy decoding."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Beam Search</h2>
+<ul><li>Keep up to k partial sequences at each step.</li><li>Expand them and retain the highest-scoring candidates.</li><li>Scores typically accumulate log probabilities, with optional length adjustment.</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-21-figure-1.png" alt="Beam-search tree showing active and pruned partial paths."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Sampling, Top-k, Top-p, and Temperature</h2>
+<ul><li>Start with probabilities A = .55, B = .30, C = .10, D = .05.</li><li>Top-k with k = 2 keeps A and B. Divide .55 and .30 by .85 before sampling.</li><li>Top-p with p = .90 keeps A, B, and C: .85 is too small and .95 reaches the threshold.</li><li>Temperature rescales logits before softmax: a lower positive temperature makes the distribution sharper.</li><li>Sampling can return a different token even with the same prompt and model.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Sampling Exercise</h2>
+<div class="quiz"><p>A = .55, B = .30, C = .10, D = .05. What does top-p = .85 keep before renormalization?</p><button class="option" type="button">A. A only</button><button class="option" type="button" data-correct>B. A and B</button><button class="option" type="button">C. A, B, and C</button><button class="option" type="button">D. All four tokens</button><div class="explain"><p>A alone has mass .55. Adding B reaches .85, so the new probabilities are .55/.85 ≈ .647 and .30/.85 ≈ .353. Greedy would choose A.</p></div></div>
+
+</section>
+
+<section class="slide">
+<h2>Pretraining</h2>
+<ul><li>Pretraining learns broadly useful patterns before task adaptation.</li><li>A causal language model predicts the next token from its prefix.</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-24-figure-1.png" alt="Foundation-model overview: pretraining data and downstream tasks."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Where Does Pretraining Data Come From?</h2>
+<ul><li>Possible sources include web text, books, code, and paired data such as images with captions.</li><li>The Pile and FineWeb2 are examples of documented data collections. Their composition differs.</li><li>Filtering, deduplication, and benchmark decontamination are separate checks.</li><li>Read the dataset card and model report. A report that gives broad categories does not reveal every training document.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Self-Supervised Pretraining</h2>
+<ul><li>Example input prefix: “The lecture starts at”. The next observed token is the training target.</li><li>Cross-entropy rewards high probability on the observed target. Backpropagation computes gradients and the optimizer updates weights.</li><li>Because the target comes from the sequence itself, a separate human label is unnecessary for each token.</li><li>Predicting text can teach useful patterns, but it does not directly optimize factual accuracy or instruction following.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Instruction Fine-Tuning</h2>
+<ul><li>Train on curated instruction–response pairs. Chat templates distinguish roles.</li><li>System: “Answer using the supplied passage.”</li><li>User: “What time does the library close Friday? Passage: The library closes at 5 p.m. Friday.”</li><li>Assistant target: “5 p.m.”</li><li>In many setups, the training loss is computed on the assistant response tokens.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Preference Tuning: RLHF and DPO</h2>
+<ul><li>For the same prompt, collect or construct candidate answers and a preference between them.</li><li>Example: prefer an answer that cites the supplied evidence over one that invents a fact.</li><li>Classic RLHF: fit a reward model to preferences, then optimize the language model with reinforcement learning.</li><li>DPO: update the language model directly from preferred and rejected pairs, without a separate reward model or RL loop in the standard procedure.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>In-Context Learning</h2>
+<p>Select a card for an example or explanation.</p><div class="kps"><div class="kp"><h3>Zero-shot</h3><p>Give instructions with no labeled examples.</p><div class="detail"><h2>Zero-shot</h2><p>Task: label the review POSITIVE or NEGATIVE. New review: “I loved this book.”</p></div></div><div class="kp"><h3>One-shot</h3><p>Show one labeled example first.</p><div class="detail"><h2>One-shot</h2><p>Example: “A waste of time” → NEGATIVE. Then classify “I loved this book.”</p></div></div><div class="kp"><h3>Few-shot</h3><p>Show several examples that demonstrate the pattern.</p><div class="detail"><h2>Few-shot</h2><p>Add “The service was excellent” → POSITIVE. The new review remains the same. Model weights do not change.</p></div></div></div>
+
+</section>
+
+<section class="slide">
+<h2>Check: training or prompting?</h2>
+<div class="quiz"><p>Which action updates parameters?</p><button class="option" type="button">A. Adding two examples to the prompt</button><button class="option" type="button">B. Changing top-p</button><button class="option" type="button" data-correct>C. Running supervised fine-tuning with an optimizer</button><button class="option" type="button">D. Requesting a shorter output</button><div class="explain"><p>Supervised fine-tuning uses a loss and optimizer. The other choices change inference inputs or decoding.</p></div></div>
+
+</section>
+
+<section class="slide">
+<h2>Fine-tuning vs In-context learning</h2>
+<p>Neither method makes generated claims automatically correct.</p><div class="table-scroll" tabindex="0" aria-label="Scrollable comparison table"><table><thead><tr><th scope="col">Dimension</th><th scope="col">Fine-tuning</th><th scope="col">In-context learning</th></tr></thead><tbody><tr><td>Model weights</td><td>Changed</td><td>Unchanged</td></tr><tr><td>Access</td><td>Requires training pipeline</td><td>Works through prompt or API</td></tr><tr><td>Best fit</td><td>Repeated specialization</td><td>Fast task adaptation</td></tr><tr><td>Cost</td><td>Training compute and data</td><td>Longer prompts and inference</td></tr><tr><td>Persistence</td><td>Behavior persists in model</td><td>Examples last only in current context</td></tr></tbody></table></div>
+
+</section>
+
+<section class="slide">
+<h2>Prompt Engineering</h2>
+<ul><li>A useful prompt normally specifies:</li><li>Task: What should the model do?</li><li>Context: What information does it need?</li><li>Constraints: Length, audience, assumptions, prohibited content</li><li>Output format: List, table, JSON, paragraph, code</li><li>Examples: Demonstrate the expected pattern when needed</li></ul><div class="media-grid"><figure class="source-figure"><img src="media/slide-31-figure-1.png" alt="Examples of task context and prompt wording for evaluation. Panel 1."></figure>
+<figure class="source-figure"><img src="media/slide-31-figure-2.png" alt="Examples of task context and prompt wording for evaluation. Panel 2."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Choosing a Prompt by Evaluation</h2>
+<ul><li>Write two prompts for the same task. Keep the model and decoding settings fixed.</li><li>Try both on the same held-out examples and score the requested behavior.</li><li>For translation, inspect meaning, terminology, and output format. Allow more than one valid wording.</li><li>Perplexity summarizes next-token prediction on specified text. A lower-perplexity prompt does not guarantee better task performance.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Worked Examples in Prompts</h2>
+<p>A worked example can show the expected solution method. A fluent explanation is not proof that the result is correct.</p><div class="media-grid"><figure class="source-figure"><img src="media/slide-33-figure-1.png" alt="A worked arithmetic example contrasts standard prompting with prompting that demonstrates intermediate steps."></figure></div>
+
+</section>
+
+<section class="slide">
+<h2>Demo: Prompt Design</h2>
+<ul><li>Source: “The library closes at 5 p.m. Friday. It reopens at 9 a.m. Monday.”</li><li>Prompt A: “Summarize this.”</li><li>Prompt B: “Using only the notice, return two bullets: Friday closing time and Monday reopening time. Do not infer weekend hours.”</li><li>Predict what B improves, then compare both answers.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Demo: Scoring Prompt Quality</h2>
+<ul><li>Score each answer: 1 point for the correct Friday time and 1 for the correct Monday time.</li><li>Add 1 point for avoiding unsupported claims and 1 for following the requested two-bullet format.</li><li>Try a second notice with a missing reopening time. A grounded answer should state that the time is unspecified.</li><li>One example can expose a problem. A held-out set is needed to compare prompts reliably.</li></ul>
+
+</section>
+
+<section class="slide">
+<h2>Lecture 1 exit check</h2>
+<div class="quiz"><p>Which statement about a deployed autoregressive language model is false?</p><button class="option" type="button">A. It predicts a distribution for the next token.</button><button class="option" type="button" data-correct>B. Few-shot prompting updates its trained weights.</button><button class="option" type="button">C. Post-training can improve instruction following.</button><button class="option" type="button">D. Sampling can return different results from the same prompt.</button><div class="explain"><p>Few-shot prompting adds examples to the input. Weight changes require a training update.</p></div></div>
+
+</section>
+
+<section class="slide">
+<h2>Generative AI Recap</h2>
+<ul><li>Generative models learn a mechanism for producing structured samples.</li><li>Training changes parameters. Decoding, prompting, and sampling use the trained parameters.</li><li>Model families differ in how they generate samples: stepwise prediction, latent decoding, adversarial training, or transport from noise.</li><li>Evaluate outputs against the task, the supplied evidence, and held-out examples.</li></ul>
+
+</section>
+</body>
+</html>
